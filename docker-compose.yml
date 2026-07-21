@@ -31,6 +31,7 @@ services:
       CARRIER_SECRET_KEY: 0123456789abcdef0123456789abcdef
       COOKIE_SECURE: "false"
       CORS_ORIGINS: http://localhost:3000
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
