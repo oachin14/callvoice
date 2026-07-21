@@ -10,7 +10,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const windowSeconds = 1
+const windowTTLSeconds = 2
+
+var allowScript = redis.NewScript(`
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+if count > tonumber(ARGV[1]) then
+  redis.call('DECR', KEYS[1])
+  return 0
+end
+return 1
+`)
 
 // Limiter enforces calls-per-second caps using Redis counters keyed by second.
 type Limiter struct {
@@ -30,14 +42,9 @@ func (l *Limiter) Allow(ctx context.Context, key string, maxCPS int, now time.Ti
 	}
 
 	windowKey := fmt.Sprintf("%s:%d", key, now.Unix())
-	count, err := l.client.Incr(ctx, windowKey).Result()
+	res, err := allowScript.Run(ctx, l.client, []string{windowKey}, maxCPS, windowTTLSeconds).Int()
 	if err != nil {
 		return false, err
 	}
-	if count == 1 {
-		if err := l.client.ExpireNX(ctx, windowKey, time.Duration(windowSeconds+1)*time.Second).Err(); err != nil {
-			return false, err
-		}
-	}
-	return count <= int64(maxCPS), nil
+	return res == 1, nil
 }
