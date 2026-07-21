@@ -23,6 +23,7 @@ import (
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
 	"github.com/callvoice/callvoice/services/edge/internal/httpapi"
 	"github.com/callvoice/callvoice/services/edge/internal/inbound"
+	"github.com/callvoice/callvoice/services/edge/internal/live"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
@@ -120,9 +121,11 @@ func main() {
 			Carriers:     carrierLoader,
 			GlobalMaxCPS: globalCPS,
 		}
+		hub := live.NewHub()
 		agentSrv := &httpapi.AgentServer{
 			DB:              db,
 			Pres:            pres,
+			Hub:             hub,
 			RequireAdmin2FA: requireAdmin2FA,
 			Dialer:          manualDialer,
 			Creds: &webrtccred.Provisioner{

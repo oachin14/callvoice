@@ -81,6 +81,83 @@ export default function AgentConsolePage() {
     softphoneRef.current?.setRemoteAudio(audioRef.current);
   }, []);
 
+  // Live statuses from edge GET /ws (cookie auth; wait for API session).
+  useEffect(() => {
+    const edgeBase = process.env.NEXT_PUBLIC_EDGE_URL ?? "http://localhost:8081";
+    const wsURL = `${edgeBase.replace(/^http/, "ws")}/ws`;
+    let ws: WebSocket | null = null;
+    let closed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function openSocket() {
+      if (closed) return;
+      ws = new WebSocket(wsURL);
+      ws.onmessage = (msg) => {
+        try {
+          const ev = JSON.parse(String(msg.data)) as {
+            type?: string;
+            payload?: Record<string, unknown>;
+          };
+          if (ev.type === "agent.state" && ev.payload) {
+            const state = String(ev.payload.state ?? "");
+            if (state === "available" || state === "paused") {
+              setPresence(state);
+              presenceRef.current = state;
+              setUiState((cur) =>
+                cur === "in_call" || cur === "offline" || cur === "connecting" ? cur : state,
+              );
+            } else if (state === "offline") {
+              setUiState((cur) => (cur === "connecting" ? cur : "offline"));
+            }
+          }
+          if (ev.type === "call.state" && ev.payload) {
+            const state = String(ev.payload.state ?? "");
+            const uuid = ev.payload.call_uuid != null ? String(ev.payload.call_uuid) : "";
+            if (state === "active" && uuid) {
+              setCallUUID(uuid);
+            } else if (state === "ended") {
+              clearExpectOutboundInvite();
+              setCallUUID(null);
+              setRinging(null);
+              setMuted(false);
+              setHeld(false);
+              setUiState((cur) => (cur === "in_call" ? presenceRef.current : cur));
+            }
+          }
+        } catch {
+          /* ignore malformed */
+        }
+      };
+      ws.onclose = () => {
+        if (closed) return;
+        retryTimer = setTimeout(() => {
+          void ensureSessionThenConnect();
+        }, 3000);
+      };
+    }
+
+    async function ensureSessionThenConnect() {
+      if (closed) return;
+      try {
+        const me = await api<User>("/auth/me");
+        setUser(me);
+      } catch {
+        retryTimer = setTimeout(() => {
+          void ensureSessionThenConnect();
+        }, 5000);
+        return;
+      }
+      openSocket();
+    }
+
+    void ensureSessionThenConnect();
+    return () => {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      ws?.close();
+    };
+  }, []);
+
   function wireSoftphone(phone: Softphone) {
     phone.setRemoteAudio(audioRef.current);
     phone.setCallbacks({

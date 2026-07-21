@@ -13,6 +13,7 @@ import (
 	"github.com/callvoice/callvoice/internal/models"
 	"github.com/callvoice/callvoice/services/edge/internal/agent"
 	"github.com/callvoice/callvoice/services/edge/internal/dialer"
+	"github.com/callvoice/callvoice/services/edge/internal/live"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
@@ -28,17 +29,19 @@ type AgentServer struct {
 	Pres            *agent.Presence
 	Creds           *webrtccred.Provisioner
 	Dialer          *dialer.Manual
+	Hub             *live.Hub
 	CORS            []string
 	RequireAdmin2FA bool
 }
 
-// Mount registers agent and call routes on mux.
+// Mount registers agent, call, and live WebSocket routes on mux.
 func (s *AgentServer) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /agent/session/start", s.withAuth(s.handleStart))
 	mux.Handle("POST /agent/session/stop", s.withAuth(s.handleStop))
 	mux.Handle("POST /agent/state", s.withAuth(s.handleState))
 	mux.Handle("GET /agent/webrtc-config", s.withAuth(s.handleWebRTCConfig))
 	s.MountCalls(mux)
+	s.MountWS(mux)
 }
 
 // CORSMiddleware allows credentialed browser calls from configured origins.
@@ -106,6 +109,7 @@ func (s *AgentServer) handleStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
+	s.publishAgentState(user.ID.String(), string(agent.StateAvailable), nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"state":  agent.StateAvailable,
@@ -120,6 +124,7 @@ func (s *AgentServer) handleStop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
+	s.publishAgentState(user.ID.String(), "offline", nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -144,6 +149,7 @@ func (s *AgentServer) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
+	s.publishAgentState(user.ID.String(), string(body.State), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "state": body.State})
 }
 

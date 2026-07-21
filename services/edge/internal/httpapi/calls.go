@@ -37,6 +37,13 @@ func (s *AgentServer) handleOutbound(w http.ResponseWriter, r *http.Request) {
 		writeOutboundError(w, err)
 		return
 	}
+	s.publishCallState(map[string]any{
+		"call_uuid":  res.CallUUID,
+		"agent_id":   user.ID.String(),
+		"carrier_id": res.CarrierID.String(),
+		"to":         res.To,
+		"state":      "active",
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
 		"call_uuid":  res.CallUUID,
@@ -63,6 +70,11 @@ func (s *AgentServer) handleHangup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
+	s.publishCallState(map[string]any{
+		"call_uuid": body.UUID,
+		"agent_id":  user.ID.String(),
+		"state":     "ended",
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
