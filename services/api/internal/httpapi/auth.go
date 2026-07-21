@@ -43,6 +43,7 @@ type Server struct {
 	CookieSecure     bool
 	RequireAdmin2FA  bool
 	Now              func() time.Time
+	CarrierPublisher CarrierChangePublisher
 }
 
 // NewServer builds an API server from environment defaults.
@@ -80,6 +81,12 @@ func NewServer(db *sql.DB) (*Server, error) {
 		requireAdmin2FA = raw == "1" || strings.EqualFold(raw, "true")
 	}
 
+	publisher, err := NewRedisCarrierPublisherFromURL(os.Getenv("REDIS_URL"))
+	if err != nil {
+		// Redis optional at boot: fall back to noop so API still serves config CRUD.
+		publisher = NoopCarrierPublisher{}
+	}
+
 	return &Server{
 		DB:               db,
 		SessionSecret:    []byte(secret),
@@ -88,6 +95,7 @@ func NewServer(db *sql.DB) (*Server, error) {
 		CookieSecure:     secure,
 		RequireAdmin2FA:  requireAdmin2FA,
 		Now:              time.Now,
+		CarrierPublisher: publisher,
 	}, nil
 }
 
@@ -105,6 +113,16 @@ func (s *Server) Routes() http.Handler {
 		r.With(s.RequireSession).Get("/me", s.handleMe)
 		r.With(s.RequireSession).Post("/2fa/setup", s.handleTOTPSetup)
 		r.With(s.RequireSession).Post("/2fa/enable", s.handleTOTPEnable)
+	})
+
+	r.Route("/admin", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(s.RequireSession, s.RequireAdmin)
+			r.Get("/carriers", s.handleListCarriers)
+			r.Post("/carriers", s.handleCreateCarrier)
+			r.Patch("/carriers/{id}", s.handlePatchCarrier)
+			r.Delete("/carriers/{id}", s.handleDeleteCarrier)
+		})
 	})
 
 	return r
