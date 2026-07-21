@@ -11,6 +11,8 @@ import styles from "./agent.module.css";
 
 type AgentUIState = "offline" | "connecting" | "available" | "paused" | "in_call";
 
+const OUTBOUND_INVITE_TIMEOUT_MS = 30_000;
+
 export default function AgentConsolePage() {
   const [user, setUser] = useState<User | null>(null);
   const [uiState, setUiState] = useState<AgentUIState>("offline");
@@ -27,11 +29,44 @@ export default function AgentConsolePage() {
   const softphoneRef = useRef<Softphone | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const expectOutboundInvite = useRef(false);
+  const outboundInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceRef = useRef<"available" | "paused">("available");
+
+  function clearOutboundInviteTimeout() {
+    if (outboundInviteTimeoutRef.current !== null) {
+      clearTimeout(outboundInviteTimeoutRef.current);
+      outboundInviteTimeoutRef.current = null;
+    }
+  }
+
+  function clearExpectOutboundInvite() {
+    expectOutboundInvite.current = false;
+    clearOutboundInviteTimeout();
+  }
+
+  function scheduleOutboundInviteTimeout(uuid: string) {
+    clearOutboundInviteTimeout();
+    outboundInviteTimeoutRef.current = setTimeout(() => {
+      outboundInviteTimeoutRef.current = null;
+      if (!expectOutboundInvite.current) return;
+      clearExpectOutboundInvite();
+      setError("L'invitation média n'est pas arrivée dans les 30 secondes.");
+      void edgeApi("/calls/hangup", {
+        method: "POST",
+        body: JSON.stringify({ uuid }),
+      }).catch(() => {
+        /* best-effort */
+      });
+      setCallUUID(null);
+      setUiState(presenceRef.current);
+    }, OUTBOUND_INVITE_TIMEOUT_MS);
+  }
 
   useEffect(() => {
     presenceRef.current = presence;
   }, [presence]);
+
+  useEffect(() => () => clearOutboundInviteTimeout(), []);
 
   useEffect(() => {
     const phone = new Softphone();
@@ -51,7 +86,7 @@ export default function AgentConsolePage() {
     phone.setCallbacks({
       onInvite: (invitation) => {
         if (expectOutboundInvite.current) {
-          expectOutboundInvite.current = false;
+          clearExpectOutboundInvite();
           void phone
             .answer(invitation)
             .then(() => {
@@ -66,6 +101,7 @@ export default function AgentConsolePage() {
         setRinging(invitation);
       },
       onBye: () => {
+        clearExpectOutboundInvite();
         setRinging(null);
         setMuted(false);
         setHeld(false);
@@ -130,6 +166,7 @@ export default function AgentConsolePage() {
           /* best-effort */
         }
       }
+      clearExpectOutboundInvite();
       await softphoneRef.current?.disconnect();
       await edgeApi("/agent/session/stop", { method: "POST" });
       setUiState("offline");
@@ -178,8 +215,9 @@ export default function AgentConsolePage() {
         },
       );
       setCallUUID(res.call_uuid);
+      scheduleOutboundInviteTimeout(res.call_uuid);
     } catch (err) {
-      expectOutboundInvite.current = false;
+      clearExpectOutboundInvite();
       setError(parseApiMessage(err));
     } finally {
       setBusy(false);
@@ -189,6 +227,7 @@ export default function AgentConsolePage() {
   async function onHangupMedia() {
     setError("");
     setBusy(true);
+    clearExpectOutboundInvite();
     try {
       await softphoneRef.current?.hangup();
       if (callUUID) {
@@ -279,6 +318,7 @@ export default function AgentConsolePage() {
   const offline = uiState === "offline";
   const connecting = uiState === "connecting";
   const inCall = uiState === "in_call";
+  const pendingOutbound = !!callUUID && !inCall;
   const registered = !offline && !connecting;
 
   return (
@@ -343,19 +383,19 @@ export default function AgentConsolePage() {
                 placeholder="+33123456789"
                 value={dialTo}
                 onChange={(e) => setDialTo(e.target.value)}
-                disabled={busy || inCall || !!ringing}
+                disabled={busy || inCall || pendingOutbound || !!ringing}
               />
-              {!inCall ? (
+              {inCall || pendingOutbound ? (
+                <button type="button" disabled={busy} onClick={onHangupMedia}>
+                  Raccrocher
+                </button>
+              ) : (
                 <button
                   type="button"
                   disabled={busy || !dialTo.trim() || !!ringing}
                   onClick={onCall}
                 >
                   Appeler
-                </button>
-              ) : (
-                <button type="button" disabled={busy} onClick={onHangupMedia}>
-                  Raccrocher
                 </button>
               )}
             </div>
