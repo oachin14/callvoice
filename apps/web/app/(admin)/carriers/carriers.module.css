@@ -1,0 +1,213 @@
+.shell {
+  --ink: #e8eef6;
+  --muted: #94a3b8;
+  --panel: rgba(12, 22, 38, 0.78);
+  --line: rgba(148, 163, 184, 0.2);
+  --accent: #1fa2a0;
+  --danger: #f87171;
+
+  min-height: 100svh;
+  padding: 2rem clamp(1rem, 3vw, 2.5rem) 3rem;
+  color: var(--ink);
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 0%, rgba(31, 162, 160, 0.16), transparent 55%),
+    radial-gradient(ellipse 50% 35% at 90% 10%, rgba(37, 99, 160, 0.14), transparent 50%),
+    linear-gradient(165deg, #071018 0%, #0d1a2b 55%, #101f33 100%);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+  animation: fade 0.45s ease-out both;
+}
+
+.brand {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.35rem;
+}
+
+.title {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.section {
+  margin-bottom: 2.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  animation: fade 0.55s ease-out both;
+}
+
+.sectionTitle {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.05rem;
+  margin-bottom: 1rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.7rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 550;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chip,
+.danger {
+  border: 1px solid var(--line);
+  background: rgba(7, 16, 24, 0.5);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.danger {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.form input,
+.form select {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(7, 16, 24, 0.65);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 0.65rem 0.7rem;
+}
+
+.form input:focus,
+.form select:focus {
+  outline: none;
+  border-color: rgba(31, 162, 160, 0.7);
+}
+
+.check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.55rem !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  font-size: 0.95rem !important;
+  color: var(--ink) !important;
+}
+
+.submit {
+  grid-column: 1 / -1;
+  justify-self: start;
+  border: 0;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), #148f8c);
+  color: #041016;
+  font: inherit;
+  font-weight: 650;
+  padding: 0.75rem 1.15rem;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.error {
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 3px;
+  background: rgba(127, 29, 29, 0.25);
+  color: var(--danger);
+  font-size: 0.92rem;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .header {
+    flex-direction: column;
+  }
+}
