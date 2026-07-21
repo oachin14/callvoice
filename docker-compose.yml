@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: callvoice
+      POSTGRES_PASSWORD: callvoice
+      POSTGRES_DB: callvoice
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callvoice"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  freeswitch:
+    build: ./deploy/freeswitch
+    network_mode: bridge
+    # ports intentionally NOT published to host public by default in prod docs;
+    # for lab, map ESL only on localhost:
+    ports: ["127.0.0.1:8021:8021"]
+  api:
+    build: ./services/api
+    ports: ["8080:8080"]
+    environment:
+      DATABASE_URL: postgres://callvoice:callvoice@postgres:5432/callvoice?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: dev-session-secret-change-me-32b
+      CARRIER_SECRET_KEY: 0123456789abcdef0123456789abcdef
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+  edge:
+    build: ./services/edge
+    ports: ["8081:8081"]
+    environment:
+      DATABASE_URL: postgres://callvoice:callvoice@postgres:5432/callvoice?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      FREESWITCH_ESL_ADDR: freeswitch:8021
+      FREESWITCH_ESL_PASSWORD: ClueCon
+      API_BASE_URL: http://api:8080
+    depends_on: [redis, freeswitch, api]
+  web:
+    build: ./apps/web
+    ports: ["3000:3000"]
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_EDGE_URL: http://localhost:8081
+    depends_on: [api, edge]
