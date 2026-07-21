@@ -20,7 +20,9 @@ services:
     # for lab, map ESL only on localhost:
     ports: ["127.0.0.1:8021:8021"]
   api:
-    build: ./services/api
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
     ports: ["8080:8080"]
     environment:
       DATABASE_URL: postgres://callvoice:callvoice@postgres:5432/callvoice?sslmode=disable
