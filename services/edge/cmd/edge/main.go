@@ -119,6 +119,7 @@ func main() {
 			Gate:         cpsgate.New(rdb),
 			RDB:          rdb,
 			Carriers:     carrierLoader,
+			Pres:         pres,
 			GlobalMaxCPS: globalCPS,
 		}
 		hub := live.NewHub()
@@ -147,6 +148,7 @@ func main() {
 			RDB:  rdb,
 			DIDs: &inbound.DIDLoader{DB: db},
 			ESL:  esl,
+			Pres: pres,
 		}
 		go inbound.RunListener(ctx, eslAddr, eslPass, inboundRouter, nil)
 	} else {

@@ -249,3 +249,39 @@ func TestTOTPVerifyFailsAudits(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE event = 'totp_failed'`).Scan(&failed))
 	require.Equal(t, 1, failed)
 }
+
+func TestTOTPVerifyLocksAfterFiveFails(t *testing.T) {
+	ts, db := setupAuthServer(t)
+	email := fmt.Sprintf("locktotp-%s@test.local", t.Name())
+	secret := "JBSWY3DPEHPK3PXP"
+	enc, err := cryptokit.Encrypt([]byte("0123456789abcdef0123456789abcdef"), []byte(secret))
+	require.NoError(t, err)
+	insertUserRole(t, db, email, "correct horse", "agent", true, enc)
+
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	client := &http.Client{Jar: jar}
+
+	body, _ := json.Marshal(map[string]string{"email": email, "password": "correct horse"})
+	resp, err := client.Post(ts.URL+"/auth/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	verifyBody, _ := json.Marshal(map[string]string{"code": "000000"})
+	for i := 0; i < 5; i++ {
+		verifyResp, err := client.Post(ts.URL+"/auth/2fa/verify", "application/json", bytes.NewReader(verifyBody))
+		require.NoError(t, err)
+		_, _ = io.Copy(io.Discard, verifyResp.Body)
+		_ = verifyResp.Body.Close()
+		require.Equal(t, http.StatusUnauthorized, verifyResp.StatusCode)
+	}
+
+	lockedResp, err := client.Post(ts.URL+"/auth/2fa/verify", "application/json", bytes.NewReader(verifyBody))
+	require.NoError(t, err)
+	defer lockedResp.Body.Close()
+	require.Equal(t, http.StatusLocked, lockedResp.StatusCode)
+
+	var payload map[string]string
+	require.NoError(t, json.NewDecoder(lockedResp.Body).Decode(&payload))
+	require.Equal(t, "account_locked", payload["error"])
+}

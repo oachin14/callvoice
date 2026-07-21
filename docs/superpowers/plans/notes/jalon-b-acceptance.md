@@ -55,3 +55,12 @@ SMOKE_SKIP_SIP=1 ./scripts/smoke_e2e.sh
 ## Honest E2E gap
 
 **Not verified end-to-end in Task 15:** WebRTC audio path (outbound + inbound), FreeSWITCH WSS registration, real carrier SIP, and production firewall nmap checks. CPS **429 after cap** is proven at dialer/unit level and via `bench_cps.sh` when api+edge+redis+postgres are running (ESL optional for 429; required for 200 originate).
+
+## Final review fixes
+
+Addressed Critical + selected Important findings from final jalon B review:
+
+1. **Hangup ownership** — `Manual.Hangup` resolves via `call:agent:{userID}` when UUID empty; when UUID is provided, requires `call:meta` with `agent_id` matching the caller (`ErrCallForbidden` / `ErrCallNotFound` → HTTP 403/404). Unit: `TestHangupRejectsForeignUUID`, `TestHangupUnknownUUIDNotFound`.
+2. **Atomic inbound agent claim** — Redis CAS `available` → `on_call` before bridge; failed claim tries next agent or busy. Bridge ESL failure releases claim. Hangup cleanup calls `ReleaseOnCall` → `available`. Units: `TestPresenceClaimAvailableConcurrent`, `TestRouteConcurrentClaimSingleWinner`.
+3. **SECURITY_CHECKLIST / MANUAL_DEPLOY** — `CARRIER_SECRET_KEY` documented as `openssl rand -hex 32` (32-byte AES key).
+4. **TOTP verify lockout** — `/auth/2fa/verify` reuses `failed_login_count` / `recordFailedLogin` (lock after 5 fails, 15m). Unit: `TestTOTPVerifyLocksAfterFiveFails`.

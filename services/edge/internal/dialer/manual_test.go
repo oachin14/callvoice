@@ -221,3 +221,63 @@ func TestHangupPublishesEventAndFreesChannel(t *testing.T) {
 	}
 	_ = res
 }
+
+func TestHangupRejectsForeignUUID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	gate := cpsgate.New(rdb)
+	carrierID := uuid.New()
+	carriers := []models.Carrier{
+		{ID: carrierID, MaxCPS: 10, MaxChannels: 5, Enabled: true, Priority: 1},
+	}
+	m := &dialer.Manual{
+		ESL:      &fakeESL{ok: true},
+		Gate:     gate,
+		RDB:      rdb,
+		Carriers: staticCarriers{list: carriers},
+	}
+
+	owner := uuid.New()
+	intruder := uuid.New()
+	res, err := m.Originate(context.Background(), dialer.OutboundRequest{
+		AgentID: owner,
+		To:      "+33111222333",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.Hangup(context.Background(), intruder, res.CallUUID)
+	if err != dialer.ErrCallForbidden {
+		t.Fatalf("want ErrCallForbidden, got %v", err)
+	}
+
+	// Owner mapping still intact.
+	stored, err := rdb.Get(context.Background(), "call:agent:"+owner.String()).Result()
+	if err != nil || stored != res.CallUUID {
+		t.Fatalf("owner mapping corrupted: stored=%q err=%v", stored, err)
+	}
+
+	err = m.Hangup(context.Background(), owner, res.CallUUID)
+	if err != nil {
+		t.Fatalf("owner hangup: %v", err)
+	}
+}
+
+func TestHangupUnknownUUIDNotFound(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	m := &dialer.Manual{
+		ESL:  &fakeESL{ok: true},
+		Gate: cpsgate.New(rdb),
+		RDB:  rdb,
+	}
+	err := m.Hangup(context.Background(), uuid.New(), uuid.New().String())
+	if err != dialer.ErrCallNotFound {
+		t.Fatalf("want ErrCallNotFound, got %v", err)
+	}
+}

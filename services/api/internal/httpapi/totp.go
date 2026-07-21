@@ -155,6 +155,12 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := s.Now().UTC()
+	if user.LockedUntil != nil && user.LockedUntil.After(now) {
+		writeJSON(w, http.StatusLocked, map[string]string{"error": "account_locked"})
+		return
+	}
+
 	if !user.TOTPEnabled {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "totp_not_enabled"})
 		return
@@ -167,8 +173,14 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !authkit.ValidateTOTP(secret, req.Code) {
+		_ = s.recordFailedLogin(r.Context(), user, clientIP(r))
 		_ = s.insertAudit(r.Context(), &user.ID, "totp_failed", clientIP(r), nil)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_totp"})
+		return
+	}
+
+	if err := s.resetFailedLogin(r.Context(), user.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
 

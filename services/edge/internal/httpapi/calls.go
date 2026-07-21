@@ -62,11 +62,16 @@ func (s *AgentServer) handleHangup(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if err := s.Dialer.Hangup(r.Context(), user.ID, body.UUID); err != nil {
-		if errors.Is(err, dialer.ErrNoActiveCall) {
+		switch {
+		case errors.Is(err, dialer.ErrNoActiveCall):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "no_active_call"})
-			return
+		case errors.Is(err, dialer.ErrCallNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "call_not_found"})
+		case errors.Is(err, dialer.ErrCallForbidden):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
 		return
 	}
 	s.publishCallState(user.ID.String(), map[string]any{

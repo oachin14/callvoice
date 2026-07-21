@@ -18,6 +18,7 @@ type State string
 const (
 	StateAvailable State = "available"
 	StatePaused    State = "paused"
+	StateOnCall    State = "on_call"
 )
 
 // ErrNotFound means the agent has no active presence key.
@@ -25,6 +26,9 @@ var ErrNotFound = errors.New("agent presence not found")
 
 // ErrInvalidState is returned for states other than available|paused.
 var ErrInvalidState = errors.New("invalid agent state")
+
+// errClaimMiss signals CAS claim failure inside a Redis WATCH txn (not exported).
+var errClaimMiss = errors.New("claim miss")
 
 // Presence tracks live agent availability in Redis.
 type Presence struct {
@@ -83,4 +87,65 @@ func (p *Presence) SetState(ctx context.Context, userID uuid.UUID, state State) 
 		return fmt.Errorf("set presence: %w", err)
 	}
 	return nil
+}
+
+// ClaimAvailable atomically moves an agent from available → on_call.
+// Returns true if this caller won the claim.
+func (p *Presence) ClaimAvailable(ctx context.Context, userID uuid.UUID) (bool, error) {
+	key := Key(userID)
+	err := p.rdb.Watch(ctx, func(tx *redis.Tx) error {
+		val, err := tx.Get(ctx, key).Result()
+		if err == redis.Nil {
+			return errClaimMiss
+		}
+		if err != nil {
+			return err
+		}
+		if State(val) != StateAvailable {
+			return errClaimMiss
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, string(StateOnCall), p.ttl)
+			return nil
+		})
+		return err
+	}, key)
+	if errors.Is(err, errClaimMiss) {
+		return false, nil
+	}
+	if err == redis.TxFailedErr {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ReleaseOnCall atomically restores available when the agent is still on_call.
+// No-op (and no error) if the key is missing or not on_call.
+func (p *Presence) ReleaseOnCall(ctx context.Context, userID uuid.UUID) error {
+	key := Key(userID)
+	err := p.rdb.Watch(ctx, func(tx *redis.Tx) error {
+		val, err := tx.Get(ctx, key).Result()
+		if err == redis.Nil {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if State(val) != StateOnCall {
+			return nil
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, string(StateAvailable), p.ttl)
+			return nil
+		})
+		return err
+	}, key)
+	if err == redis.TxFailedErr {
+		// Concurrent update — leave state as-is; next cleanup/hangup can retry.
+		return nil
+	}
+	return err
 }

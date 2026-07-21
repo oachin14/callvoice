@@ -111,7 +111,7 @@ docker build -f services/api/Dockerfile -t callvoice-api:latest .
 export DATABASE_URL=postgres://callvoice:SECRET@127.0.0.1:5432/callvoice?sslmode=disable
 export REDIS_URL=redis://127.0.0.1:6379
 export SESSION_SECRET="$(openssl rand -hex 32)"
-export CARRIER_SECRET_KEY="$(openssl rand -hex 16)"   # 32 hex chars = 16 bytes
+export CARRIER_SECRET_KEY="$(openssl rand -hex 32)"   # 64 hex chars = 32 bytes AES-256
 export COOKIE_SECURE=true
 export CORS_ORIGINS=https://app.example.com
 export REQUIRE_ADMIN_2FA=true

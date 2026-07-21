@@ -14,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/callvoice/callvoice/internal/models"
+	"github.com/callvoice/callvoice/services/edge/internal/agent"
 	"github.com/callvoice/callvoice/services/edge/internal/cpsgate"
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
 )
@@ -32,6 +33,12 @@ var ErrInvalidE164 = errors.New("invalid_e164")
 
 // ErrNoActiveCall means the agent has no tracked outbound call to hang up.
 var ErrNoActiveCall = errors.New("no_active_call")
+
+// ErrCallNotFound means the given call UUID is not tracked.
+var ErrCallNotFound = errors.New("call_not_found")
+
+// ErrCallForbidden means the call exists but is owned by another agent.
+var ErrCallForbidden = errors.New("call_forbidden")
 
 var e164Re = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
 
@@ -65,6 +72,7 @@ type Manual struct {
 	Gate         *cpsgate.Gate
 	RDB          *redis.Client
 	Carriers     CarrierLister
+	Pres         *agent.Presence // optional; releases on_call after hangup
 	GlobalMaxCPS int
 	Now          func() time.Time
 }
@@ -204,7 +212,10 @@ func (m *Manual) Originate(ctx context.Context, req OutboundRequest) (*OutboundR
 }
 
 // Hangup kills the agent's active call (or the given UUID) and cleans channel state.
+// Ownership: empty UUID uses call:agent:{id}; explicit UUID requires meta.AgentID == agentID.
 func (m *Manual) Hangup(ctx context.Context, agentID uuid.UUID, callUUID string) error {
+	var meta *callMeta
+
 	if callUUID == "" {
 		stored, err := m.RDB.Get(ctx, agentCallKey(agentID)).Result()
 		if err == redis.Nil {
@@ -214,9 +225,21 @@ func (m *Manual) Hangup(ctx context.Context, agentID uuid.UUID, callUUID string)
 			return err
 		}
 		callUUID = stored
+		meta, _ = m.loadMeta(ctx, callUUID)
+	} else {
+		loaded, err := m.loadMeta(ctx, callUUID)
+		if err == redis.Nil {
+			return ErrCallNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if loaded.AgentID != agentID.String() {
+			return ErrCallForbidden
+		}
+		meta = loaded
 	}
 
-	meta, _ := m.loadMeta(ctx, callUUID)
 	body, err := m.ESL.API("uuid_kill " + callUUID)
 	if err != nil {
 		return err
@@ -227,6 +250,9 @@ func (m *Manual) Hangup(ctx context.Context, agentID uuid.UUID, callUUID string)
 
 	if err := m.cleanupCall(ctx, agentID, callUUID, meta); err != nil {
 		return err
+	}
+	if m.Pres != nil {
+		_ = m.Pres.ReleaseOnCall(ctx, agentID)
 	}
 	_ = m.publishEvent(ctx, map[string]any{
 		"type":       "hangup",

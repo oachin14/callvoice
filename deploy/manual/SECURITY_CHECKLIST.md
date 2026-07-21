@@ -41,7 +41,7 @@
 - [ ] `SESSION_SECRET` et `CARRIER_SECRET_KEY` aléatoires, distincts par env, hors git
   ```bash
   openssl rand -hex 32   # SESSION_SECRET
-  openssl rand -hex 16   # CARRIER_SECRET_KEY (32 hex = 16 bytes AES)
+  openssl rand -hex 32   # CARRIER_SECRET_KEY (64 hex = 32 bytes AES-256)
   ```
 - [ ] `CORS_ORIGINS` limité au(x) front réel(s) — pas `*`
 - [ ] Logs audit login / `totp_failed` consultables

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -76,6 +77,14 @@ func TestRouteDIDToAvailableAgent(t *testing.T) {
 	}
 	if dec.AgentUser != inbound.AgentSIPUser(agentID) {
 		t.Fatalf("agent user = %q", dec.AgentUser)
+	}
+	// Claim must leave agent on_call so a second inbound cannot pick them.
+	st, err := rdb.Get(ctx, agent.Key(agentID)).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.State(st) != agent.StateOnCall {
+		t.Fatalf("after claim state = %q, want on_call", st)
 	}
 }
 
@@ -196,6 +205,51 @@ func TestParseEventIgnoresOutboundAgent(t *testing.T) {
 	}
 	if _, ok := inbound.ParseEvent(func(k string) string { return headers[k] }); ok {
 		t.Fatal("expected skip outbound")
+	}
+}
+
+func TestRouteConcurrentClaimSingleWinner(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	agentID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	ctx := context.Background()
+	if err := rdb.Set(ctx, agent.Key(agentID), string(agent.StateAvailable), 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &inbound.Router{
+		RDB: rdb,
+		DIDs: inbound.MapDIDLookup{
+			"+33155556666": {Number: "+33155556666", Destination: inbound.DefaultDestination},
+		},
+	}
+
+	const n = 20
+	var bridges atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			dec, err := r.Route(ctx, "+33155556666")
+			if err != nil {
+				t.Errorf("Route: %v", err)
+				return
+			}
+			if dec.Action == inbound.ActionBridge {
+				bridges.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := bridges.Load(); got != 1 {
+		t.Fatalf("bridge winners = %d, want 1", got)
+	}
+	st, _ := rdb.Get(ctx, agent.Key(agentID)).Result()
+	if agent.State(st) != agent.StateOnCall {
+		t.Fatalf("state = %q, want on_call", st)
 	}
 }
 

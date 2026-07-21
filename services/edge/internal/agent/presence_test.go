@@ -2,6 +2,8 @@ package agent_test
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,6 +105,75 @@ func TestPresenceSetStateRequiresActiveSession(t *testing.T) {
 	err := p.SetState(context.Background(), uid, agent.StatePaused)
 	if err != agent.ErrNotFound {
 		t.Fatalf("SetState without start err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPresenceClaimAvailableConcurrent(t *testing.T) {
+	p, cleanup := newPresence(t)
+	defer cleanup()
+
+	uid := uuid.New()
+	ctx := context.Background()
+	if err := p.Start(ctx, uid); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	const n = 32
+	var wins atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			ok, err := p.ClaimAvailable(ctx, uid)
+			if err != nil {
+				t.Errorf("ClaimAvailable: %v", err)
+				return
+			}
+			if ok {
+				wins.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := wins.Load(); got != 1 {
+		t.Fatalf("concurrent claim winners = %d, want 1", got)
+	}
+	got, err := p.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != agent.StateOnCall {
+		t.Fatalf("state = %q, want on_call", got)
+	}
+
+	if err := p.ReleaseOnCall(ctx, uid); err != nil {
+		t.Fatalf("ReleaseOnCall: %v", err)
+	}
+	got, err = p.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get after release: %v", err)
+	}
+	if got != agent.StateAvailable {
+		t.Fatalf("state after release = %q, want available", got)
+	}
+}
+
+func TestPresenceClaimRejectsPaused(t *testing.T) {
+	p, cleanup := newPresence(t)
+	defer cleanup()
+
+	uid := uuid.New()
+	ctx := context.Background()
+	_ = p.Start(ctx, uid)
+	_ = p.SetState(ctx, uid, agent.StatePaused)
+
+	ok, err := p.ClaimAvailable(ctx, uid)
+	if err != nil {
+		t.Fatalf("ClaimAvailable: %v", err)
+	}
+	if ok {
+		t.Fatal("expected claim fail on paused agent")
 	}
 }
 

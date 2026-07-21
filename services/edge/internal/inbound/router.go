@@ -68,8 +68,16 @@ type Router struct {
 	RDB  *redis.Client
 	DIDs DIDLookup
 	ESL  ESL
+	Pres *agent.Presence // optional; defaults to NewPresence(RDB, DefaultTTL)
 
 	seen sync.Map // channel UUID → struct{} to dedupe CUSTOM + CHANNEL_CREATE
+}
+
+func (r *Router) presence() *agent.Presence {
+	if r.Pres != nil {
+		return r.Pres
+	}
+	return agent.NewPresence(r.RDB, agent.DefaultTTL)
 }
 
 // AgentSIPUser returns the FreeSWITCH directory user for an agent.
@@ -109,8 +117,10 @@ func isAgentPool(dest string) bool {
 	return d == DefaultDestination || d == "queue:default" || strings.HasPrefix(d, "agent_pool:")
 }
 
-// FirstAvailableAgent scans Redis for the first agent:* key with state available.
+// FirstAvailableAgent scans Redis and atomically claims the first available agent
+// (CAS available → on_call). Failed claims try the next candidate.
 func (r *Router) FirstAvailableAgent(ctx context.Context) (uuid.UUID, error) {
+	pres := r.presence()
 	var cursor uint64
 	for {
 		keys, next, err := r.RDB.Scan(ctx, cursor, agentKeyPrefix+"*", 50).Result()
@@ -131,6 +141,13 @@ func (r *Router) FirstAvailableAgent(ctx context.Context) (uuid.UUID, error) {
 			idStr := strings.TrimPrefix(key, agentKeyPrefix)
 			id, err := uuid.Parse(idStr)
 			if err != nil {
+				continue
+			}
+			ok, err := pres.ClaimAvailable(ctx, id)
+			if err != nil {
+				return uuid.Nil, err
+			}
+			if !ok {
 				continue
 			}
 			return id, nil
@@ -203,8 +220,8 @@ func (r *Router) HandleEvent(ctx context.Context, ev Event) (*Decision, error) {
 }
 
 // Apply bridges the parked channel to the agent or rejects with busy.
+// On bridge failure after a claimed agent, presence is restored to available.
 func (r *Router) Apply(ctx context.Context, channelUUID string, dec *Decision) error {
-	_ = ctx
 	if r.ESL == nil {
 		return fmt.Errorf("esl unavailable")
 	}
@@ -214,9 +231,11 @@ func (r *Router) Apply(ctx context.Context, channelUUID string, dec *Decision) e
 		cmd := fmt.Sprintf("uuid_transfer %s bridge:user/%s inline", channelUUID, escapeFS(dec.AgentUser))
 		body, err := r.ESL.API(cmd)
 		if err != nil {
+			r.releaseClaimed(ctx, dec.AgentID)
 			return err
 		}
 		if !isESLOK(body) {
+			r.releaseClaimed(ctx, dec.AgentID)
 			return fmt.Errorf("uuid_transfer: %s", strings.TrimSpace(body))
 		}
 		return nil
@@ -234,6 +253,13 @@ func (r *Router) Apply(ctx context.Context, channelUUID string, dec *Decision) e
 	default:
 		return fmt.Errorf("unknown action %q", dec.Action)
 	}
+}
+
+func (r *Router) releaseClaimed(ctx context.Context, agentID uuid.UUID) {
+	if agentID == uuid.Nil {
+		return
+	}
+	_ = r.presence().ReleaseOnCall(ctx, agentID)
 }
 
 func escapeFS(s string) string {
