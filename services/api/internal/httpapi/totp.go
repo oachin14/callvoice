@@ -102,7 +102,27 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Admins must re-login through totp_required → verify; drop the enrollment session.
+	if user.Role == models.UserRoleAdmin {
+		s.clearSessionCookie(w, r)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":           "ok",
+			"relogin_required": true,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(CookieSession); err == nil && c.Value != "" {
+		_, _ = s.DB.ExecContext(r.Context(),
+			`DELETE FROM sessions WHERE token_hash = $1`,
+			authkit.HashToken(c.Value),
+		)
+	}
+	clearCookie(w, CookieSession, s.CookieSecure)
 }
 
 // handleTOTPVerify completes login using cv_pending + TOTP code, issuing a full session.

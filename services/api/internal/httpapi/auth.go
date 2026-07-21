@@ -237,6 +237,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // RequireSession loads the authenticated user from cv_session into context.
+// When REQUIRE_ADMIN_2FA is on, admins without TOTP may only hit enrollment allowlist routes.
 func (s *Server) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(CookieSession)
@@ -251,9 +252,31 @@ func (s *Server) RequireSession(next http.Handler) http.Handler {
 			return
 		}
 
+		if s.adminTOTPSetupRequired(user) && !admin2FAEnrollmentAllowed(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "totp_setup_required"})
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) adminTOTPSetupRequired(user *models.User) bool {
+	return s.RequireAdmin2FA && user.Role == models.UserRoleAdmin && !user.TOTPEnabled
+}
+
+// admin2FAEnrollmentAllowed is the only authenticated surface for admins mid-enrollment.
+func admin2FAEnrollmentAllowed(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/auth/2fa/setup", "/auth/2fa/enable", "/auth/logout":
+		return true
+	default:
+		return false
+	}
 }
 
 // UserFromContext returns the authenticated user, if any.

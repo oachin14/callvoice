@@ -163,12 +163,63 @@ func TestAdminLoginWithoutTOTPRequiresSetup(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE event = 'login_ok'`).Scan(&loginOK))
 	require.Equal(t, 0, loginOK)
 
+	meResp, err := client.Get(ts.URL + "/auth/me")
+	require.NoError(t, err)
+	defer meResp.Body.Close()
+	require.Equal(t, http.StatusForbidden, meResp.StatusCode)
+	var meErr map[string]string
+	require.NoError(t, json.NewDecoder(meResp.Body).Decode(&meErr))
+	require.Equal(t, "totp_setup_required", meErr["error"])
+
 	// Session is issued only so they can call setup/enable.
 	setupResp, err := client.Post(ts.URL+"/auth/2fa/setup", "application/json", nil)
 	require.NoError(t, err)
-	_, _ = io.Copy(io.Discard, setupResp.Body)
-	_ = setupResp.Body.Close()
+	defer setupResp.Body.Close()
 	require.Equal(t, http.StatusOK, setupResp.StatusCode)
+
+	var setupPayload map[string]string
+	require.NoError(t, json.NewDecoder(setupResp.Body).Decode(&setupPayload))
+	require.NotEmpty(t, setupPayload["secret"])
+
+	code, err := authkit.GenerateTOTPCode(setupPayload["secret"])
+	require.NoError(t, err)
+	enableBody, _ := json.Marshal(map[string]string{"code": code})
+	enableResp, err := client.Post(ts.URL+"/auth/2fa/enable", "application/json", bytes.NewReader(enableBody))
+	require.NoError(t, err)
+	defer enableResp.Body.Close()
+	require.Equal(t, http.StatusOK, enableResp.StatusCode)
+
+	var enablePayload map[string]any
+	require.NoError(t, json.NewDecoder(enableResp.Body).Decode(&enablePayload))
+	require.Equal(t, "ok", enablePayload["status"])
+	require.Equal(t, true, enablePayload["relogin_required"])
+
+	// Enrollment session cleared — must re-login through TOTP verify.
+	meAfter, err := client.Get(ts.URL + "/auth/me")
+	require.NoError(t, err)
+	defer meAfter.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, meAfter.StatusCode)
+
+	loginResp, err := client.Post(ts.URL+"/auth/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer loginResp.Body.Close()
+	var loginPayload map[string]any
+	require.NoError(t, json.NewDecoder(loginResp.Body).Decode(&loginPayload))
+	require.Equal(t, "totp_required", loginPayload["status"])
+
+	code2, err := authkit.GenerateTOTPCode(setupPayload["secret"])
+	require.NoError(t, err)
+	verifyBody, _ := json.Marshal(map[string]string{"code": code2})
+	verifyResp, err := client.Post(ts.URL+"/auth/2fa/verify", "application/json", bytes.NewReader(verifyBody))
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, verifyResp.Body)
+	_ = verifyResp.Body.Close()
+	require.Equal(t, http.StatusOK, verifyResp.StatusCode)
+
+	meOK, err := client.Get(ts.URL + "/auth/me")
+	require.NoError(t, err)
+	defer meOK.Body.Close()
+	require.Equal(t, http.StatusOK, meOK.StatusCode)
 }
 
 func TestTOTPVerifyFailsAudits(t *testing.T) {
