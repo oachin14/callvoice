@@ -122,6 +122,47 @@
   cursor: not-allowed;
 }
 
+.softphone {
+  margin: 0 0 1.25rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(11, 61, 74, 0.18);
+}
+
+.softphoneTitle {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.softphoneSub {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  color: #4a5c66;
+  word-break: break-all;
+}
+
+.dtmf {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 3.25rem));
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.dtmfKey {
+  appearance: none;
+  border: 1px solid rgba(11, 61, 74, 0.35);
+  background: rgba(255, 255, 255, 0.65);
+  color: #142028;
+  padding: 0.55rem 0;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.dtmfKey:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .creds {
   margin: 0;
   padding: 1rem;

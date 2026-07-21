@@ -1,22 +1,80 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import type { Invitation } from "sip.js";
 import { api, parseApiMessage, type User } from "../../lib/api";
 import { edgeApi, type WebRTCConfig } from "../../lib/edge";
+import { Softphone } from "../../lib/softphone";
+import { SoftphonePanel } from "./softphone";
 import styles from "./agent.module.css";
 
-type PresenceState = "offline" | "available" | "paused";
+type AgentUIState = "offline" | "connecting" | "available" | "paused" | "in_call";
 
 export default function AgentConsolePage() {
   const [user, setUser] = useState<User | null>(null);
-  const [presence, setPresence] = useState<PresenceState>("offline");
+  const [uiState, setUiState] = useState<AgentUIState>("offline");
+  const [presence, setPresence] = useState<"available" | "paused">("available");
   const [webrtc, setWebrtc] = useState<WebRTCConfig | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dialTo, setDialTo] = useState("");
   const [callUUID, setCallUUID] = useState<string | null>(null);
-  const [inCall, setInCall] = useState(false);
+  const [ringing, setRinging] = useState<Invitation | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [held, setHeld] = useState(false);
+
+  const softphoneRef = useRef<Softphone | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const expectOutboundInvite = useRef(false);
+  const presenceRef = useRef<"available" | "paused">("available");
+
+  useEffect(() => {
+    presenceRef.current = presence;
+  }, [presence]);
+
+  useEffect(() => {
+    const phone = new Softphone();
+    softphoneRef.current = phone;
+    return () => {
+      void phone.disconnect();
+      softphoneRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    softphoneRef.current?.setRemoteAudio(audioRef.current);
+  }, []);
+
+  function wireSoftphone(phone: Softphone) {
+    phone.setRemoteAudio(audioRef.current);
+    phone.setCallbacks({
+      onInvite: (invitation) => {
+        if (expectOutboundInvite.current) {
+          expectOutboundInvite.current = false;
+          void phone
+            .answer(invitation)
+            .then(() => {
+              setRinging(null);
+              setMuted(false);
+              setHeld(false);
+              setUiState("in_call");
+            })
+            .catch((err) => setError(parseApiMessage(err)));
+          return;
+        }
+        setRinging(invitation);
+      },
+      onBye: () => {
+        setRinging(null);
+        setMuted(false);
+        setHeld(false);
+        setCallUUID(null);
+        setUiState(presenceRef.current);
+      },
+      onError: (err) => setError(err.message),
+    });
+  }
 
   async function ensureUser() {
     if (user) return user;
@@ -28,16 +86,31 @@ export default function AgentConsolePage() {
   async function onConnect() {
     setError("");
     setBusy(true);
+    setUiState("connecting");
     try {
       await ensureUser();
       const res = await edgeApi<{ status: string; state: string; webrtc: WebRTCConfig }>(
         "/agent/session/start",
         { method: "POST" },
       );
-      setPresence("available");
       setWebrtc(res.webrtc);
+      setPresence("available");
+      presenceRef.current = "available";
+
+      const phone = softphoneRef.current;
+      if (!phone) throw new Error("Softphone unavailable");
+      wireSoftphone(phone);
+      await phone.connect(res.webrtc);
+      setUiState("available");
     } catch (err) {
       setError(parseApiMessage(err));
+      setUiState("offline");
+      setWebrtc(null);
+      try {
+        await softphoneRef.current?.disconnect();
+      } catch {
+        /* ignore */
+      }
     } finally {
       setBusy(false);
     }
@@ -47,18 +120,24 @@ export default function AgentConsolePage() {
     setError("");
     setBusy(true);
     try {
-      if (inCall) {
+      if (uiState === "in_call" || callUUID) {
         try {
-          await edgeApi("/calls/hangup", { method: "POST", body: JSON.stringify({}) });
+          await edgeApi("/calls/hangup", {
+            method: "POST",
+            body: JSON.stringify(callUUID ? { uuid: callUUID } : {}),
+          });
         } catch {
           /* best-effort */
         }
       }
+      await softphoneRef.current?.disconnect();
       await edgeApi("/agent/session/stop", { method: "POST" });
-      setPresence("offline");
+      setUiState("offline");
       setWebrtc(null);
-      setInCall(false);
       setCallUUID(null);
+      setRinging(null);
+      setMuted(false);
+      setHeld(false);
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
@@ -75,19 +154,10 @@ export default function AgentConsolePage() {
         body: JSON.stringify({ state }),
       });
       setPresence(state);
-    } catch (err) {
-      setError(parseApiMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshConfig() {
-    setError("");
-    setBusy(true);
-    try {
-      const cfg = await edgeApi<WebRTCConfig>("/agent/webrtc-config");
-      setWebrtc(cfg);
+      presenceRef.current = state;
+      if (uiState !== "in_call") {
+        setUiState(state);
+      }
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
@@ -99,6 +169,7 @@ export default function AgentConsolePage() {
     setError("");
     setBusy(true);
     try {
+      expectOutboundInvite.current = true;
       const res = await edgeApi<{ status: string; call_uuid: string }>(
         "/calls/outbound",
         {
@@ -107,7 +178,34 @@ export default function AgentConsolePage() {
         },
       );
       setCallUUID(res.call_uuid);
-      setInCall(true);
+    } catch (err) {
+      expectOutboundInvite.current = false;
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onHangupMedia() {
+    setError("");
+    setBusy(true);
+    try {
+      await softphoneRef.current?.hangup();
+      if (callUUID) {
+        try {
+          await edgeApi("/calls/hangup", {
+            method: "POST",
+            body: JSON.stringify({ uuid: callUUID }),
+          });
+        } catch {
+          /* media hangup may already tear down */
+        }
+      }
+      setCallUUID(null);
+      setRinging(null);
+      setMuted(false);
+      setHeld(false);
+      setUiState(presenceRef.current);
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
@@ -115,22 +213,73 @@ export default function AgentConsolePage() {
     }
   }
 
-  async function onHangup() {
+  async function onAnswer() {
     setError("");
     setBusy(true);
     try {
-      await edgeApi("/calls/hangup", {
-        method: "POST",
-        body: JSON.stringify(callUUID ? { uuid: callUUID } : {}),
-      });
-      setInCall(false);
-      setCallUUID(null);
+      const inv = ringing;
+      if (!inv) return;
+      await softphoneRef.current?.answer(inv);
+      setRinging(null);
+      setMuted(false);
+      setHeld(false);
+      setUiState("in_call");
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
       setBusy(false);
     }
   }
+
+  async function onReject() {
+    setError("");
+    setBusy(true);
+    try {
+      await softphoneRef.current?.hangup();
+      setRinging(null);
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onMuteToggle() {
+    const phone = softphoneRef.current;
+    if (!phone) return;
+    const next = !muted;
+    phone.mute(next);
+    setMuted(next);
+  }
+
+  async function onHoldToggle() {
+    setError("");
+    setBusy(true);
+    try {
+      const phone = softphoneRef.current;
+      if (!phone) return;
+      const next = !held;
+      await phone.hold(next);
+      setHeld(next);
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDtmf(digit: string) {
+    try {
+      await softphoneRef.current?.sendDTMF(digit);
+    } catch (err) {
+      setError(parseApiMessage(err));
+    }
+  }
+
+  const offline = uiState === "offline";
+  const connecting = uiState === "connecting";
+  const inCall = uiState === "in_call";
+  const registered = !offline && !connecting;
 
   return (
     <main className={styles.page}>
@@ -138,7 +287,7 @@ export default function AgentConsolePage() {
         <p className={styles.brand}>CallVoice</p>
         <h1 className={styles.title}>Console agent</h1>
         <p className={styles.sub}>
-          Session WebRTC + appel sortant manuel (originate serveur).
+          Softphone WebRTC (SIP.js) — média navigateur, originate serveur.
         </p>
         <Link className={styles.link} href="/login">
           Connexion
@@ -147,16 +296,17 @@ export default function AgentConsolePage() {
 
       <section className={styles.panel}>
         <p className={styles.status}>
-          État : <strong>{presence}</strong>
-          {inCall ? " · en appel" : ""}
+          État : <strong>{uiState}</strong>
           {user ? ` · ${user.email}` : ""}
         </p>
         {error ? <p className={styles.error}>{error}</p> : null}
 
+        <audio ref={audioRef} autoPlay playsInline />
+
         <div className={styles.actions}>
-          {presence === "offline" ? (
-            <button type="button" disabled={busy} onClick={onConnect}>
-              Se connecter
+          {offline || connecting ? (
+            <button type="button" disabled={busy || connecting} onClick={onConnect}>
+              {connecting ? "Connexion…" : "Se connecter"}
             </button>
           ) : (
             <>
@@ -168,21 +318,22 @@ export default function AgentConsolePage() {
                   Pause
                 </button>
               ) : (
-                <button type="button" disabled={busy || inCall} onClick={() => setState("available")}>
+                <button
+                  type="button"
+                  disabled={busy || inCall}
+                  onClick={() => setState("available")}
+                >
                   Disponible
                 </button>
               )}
-              <button type="button" disabled={busy} onClick={refreshConfig}>
-                Rafraîchir WebRTC
-              </button>
             </>
           )}
         </div>
 
-        {presence !== "offline" ? (
+        {registered ? (
           <div className={styles.dial}>
             <label className={styles.dialLabel} htmlFor="dial-to">
-              Numéro (E.164)
+              Numéro (E.164) — originate serveur
             </label>
             <div className={styles.dialRow}>
               <input
@@ -192,20 +343,38 @@ export default function AgentConsolePage() {
                 placeholder="+33123456789"
                 value={dialTo}
                 onChange={(e) => setDialTo(e.target.value)}
-                disabled={busy || inCall}
+                disabled={busy || inCall || !!ringing}
               />
               {!inCall ? (
-                <button type="button" disabled={busy || !dialTo.trim()} onClick={onCall}>
+                <button
+                  type="button"
+                  disabled={busy || !dialTo.trim() || !!ringing}
+                  onClick={onCall}
+                >
                   Appeler
                 </button>
               ) : (
-                <button type="button" disabled={busy} onClick={onHangup}>
+                <button type="button" disabled={busy} onClick={onHangupMedia}>
                   Raccrocher
                 </button>
               )}
             </div>
           </div>
         ) : null}
+
+        <SoftphonePanel
+          ringing={ringing}
+          inCall={inCall}
+          muted={muted}
+          held={held}
+          busy={busy}
+          onAnswer={onAnswer}
+          onReject={onReject}
+          onHangup={onHangupMedia}
+          onMuteToggle={onMuteToggle}
+          onHoldToggle={onHoldToggle}
+          onDtmf={onDtmf}
+        />
 
         {webrtc ? (
           <pre className={styles.creds} aria-label="Configuration WebRTC">
