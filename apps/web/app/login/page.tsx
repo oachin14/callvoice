@@ -2,35 +2,11 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, ApiError, LoginResponse, User } from "@/lib/api";
+import { api, LoginResponse, parseApiMessage, User } from "@/lib/api";
 import styles from "./login.module.css";
 
 type Step = "credentials" | "totp" | "setup";
 
-function parseApiMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(err.body) as { error?: string };
-      switch (parsed.error) {
-        case "invalid_credentials":
-          return "Identifiants incorrects.";
-        case "account_locked":
-          return "Compte temporairement verrouillé. Réessayez plus tard.";
-        case "invalid_totp":
-          return "Code d’authentification invalide.";
-        case "pending_required":
-        case "pending_invalid":
-          return "Session 2FA expirée. Reconnectez-vous.";
-        default:
-          return parsed.error || "Une erreur est survenue.";
-      }
-    } catch {
-      return err.message || "Une erreur est survenue.";
-    }
-  }
-  if (err instanceof Error) return err.message;
-  return "Une erreur est survenue.";
-}
 
 export default function LoginPage() {
   const router = useRouter();

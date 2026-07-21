@@ -7,6 +7,7 @@ import {
   ApiError,
   Carrier,
   CreateCarrierInput,
+  parseApiMessage,
   User,
 } from "@/lib/api";
 import styles from "./carriers.module.css";
@@ -40,29 +41,31 @@ export default function CarriersPage() {
   const [carriers, setCarriers] = useState<Carrier[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
+    setAccessDenied(false);
     try {
       const me = await api<User>("/auth/me");
       if (me.role !== "admin") {
-        setError("Accès réservé aux administrateurs.");
-        setLoading(false);
+        setAccessDenied(true);
         return;
       }
       setUser(me);
       const list = await api<Carrier[]>("/admin/carriers");
       setCarriers(list);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
+      if (
+        err instanceof ApiError &&
+        (err.status === 401 || err.status === 403)
+      ) {
         router.replace("/login");
         return;
       }
-      setError(
-        err instanceof Error ? err.message : "Impossible de charger les carriers.",
-      );
+      setError(parseApiMessage(err));
     } finally {
       setLoading(false);
     }
@@ -100,9 +103,7 @@ export default function CarriersPage() {
       setForm(emptyForm);
       await load();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Échec de création du carrier.",
-      );
+      setError(parseApiMessage(err));
     } finally {
       setSaving(false);
     }
@@ -117,7 +118,7 @@ export default function CarriersPage() {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Mise à jour impossible.");
+      setError(parseApiMessage(err));
     }
   }
 
@@ -128,7 +129,7 @@ export default function CarriersPage() {
       await api<void>(`/admin/carriers/${id}`, { method: "DELETE" });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Suppression impossible.");
+      setError(parseApiMessage(err));
     }
   }
 
@@ -144,6 +145,14 @@ export default function CarriersPage() {
     return (
       <main className={styles.shell}>
         <p className={styles.muted}>Chargement…</p>
+      </main>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <main className={styles.shell}>
+        <p className={styles.error}>Accès réservé aux administrateurs.</p>
       </main>
     );
   }
