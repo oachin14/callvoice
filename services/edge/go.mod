@@ -4,6 +4,9 @@ go 1.25.5
 
 require (
 	github.com/callvoice/callvoice v0.0.0
+	github.com/fiorix/go-eventsocket v0.0.0-20240904143901-40effc2c18a7
+	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.10.9
 	github.com/redis/go-redis/v9 v9.7.3
 )
 

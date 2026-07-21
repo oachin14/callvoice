@@ -19,6 +19,8 @@ services:
     # ports intentionally NOT published to host public by default in prod docs;
     # for lab, map ESL only on localhost:
     ports: ["127.0.0.1:8021:8021"]
+    volumes:
+      - fs_gateways:/etc/freeswitch/gateways
   api:
     build:
       context: .
@@ -36,15 +38,21 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
   edge:
-    build: ./services/edge
+    build:
+      context: .
+      dockerfile: services/edge/Dockerfile
     ports: ["8081:8081"]
     environment:
       DATABASE_URL: postgres://callvoice:callvoice@postgres:5432/callvoice?sslmode=disable
       REDIS_URL: redis://redis:6379
+      CARRIER_SECRET_KEY: 0123456789abcdef0123456789abcdef
       FREESWITCH_ESL_ADDR: freeswitch:8021
       FREESWITCH_ESL_PASSWORD: ClueCon
+      FREESWITCH_GATEWAY_DIR: /etc/freeswitch/gateways
       API_BASE_URL: http://api:8080
-    depends_on: [redis, freeswitch, api]
+    volumes:
+      - fs_gateways:/etc/freeswitch/gateways
+    depends_on: [redis, freeswitch, api, postgres]
   web:
     build: ./apps/web
     ports: ["3000:3000"]
@@ -52,3 +60,6 @@ services:
       NEXT_PUBLIC_API_URL: http://localhost:8080
       NEXT_PUBLIC_EDGE_URL: http://localhost:8081
     depends_on: [api, edge]
+
+volumes:
+  fs_gateways:

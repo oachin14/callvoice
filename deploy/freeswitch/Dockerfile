@@ -1,4 +1,8 @@
-# deploy/freeswitch/Dockerfile
+# Lab FreeSWITCH: ESL on 8021 (password ClueCon — lab only), Sofia external + BYOC gateways dir.
 FROM safarov/freeswitch:latest
-# Lab image: ESL on 8021, Sofia internal only. Harden in Task 9/14.
-EXPOSE 8021 5060/udp 5060/tcp 8081 8082
+
+COPY conf/autoload_configs/event_socket.conf.xml /etc/freeswitch/autoload_configs/event_socket.conf.xml
+COPY conf/sip_profiles/external.xml /etc/freeswitch/sip_profiles/external.xml
+RUN mkdir -p /etc/freeswitch/gateways
+
+EXPOSE 8021 5060/udp 5060/tcp 5080/udp 5080/tcp 8081 8082
