@@ -36,6 +36,15 @@ func openTestDB(t *testing.T) *sql.DB {
 		_ = conn.Close()
 		t.Skipf("postgres unavailable: %v", err)
 	}
+	var hasUsers bool
+	if err := conn.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'users'
+		)`).Scan(&hasUsers); err != nil || !hasUsers {
+		_ = conn.Close()
+		t.Skip("postgres schema not migrated (users missing)")
+	}
 	return conn
 }
 

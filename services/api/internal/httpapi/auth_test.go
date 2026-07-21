@@ -28,9 +28,10 @@ func setupAuthServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	conn := testutil.OpenTestDB(t)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	databaseURL := testutil.DatabaseURL()
-	require.NoError(t, migrate.Down(databaseURL))
-	require.NoError(t, migrate.Up(databaseURL))
+	// Truncate instead of migrate.Down to avoid racing parallel packages on a shared lab DB.
+	require.NoError(t, migrate.Up(testutil.DatabaseURL()))
+	_, err := conn.Exec(`TRUNCATE audit_logs, sessions, dids, carriers, users RESTART IDENTITY CASCADE`)
+	require.NoError(t, err)
 
 	srv := &httpapi.Server{
 		DB:               conn,
