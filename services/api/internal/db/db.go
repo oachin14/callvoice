@@ -41,15 +41,14 @@ func Open(ctx context.Context) (*sql.DB, error) {
 }
 
 func OpenAndMigrate(ctx context.Context) (*sql.DB, error) {
-	conn, err := Open(ctx)
-	if err != nil {
-		return nil, err
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = defaultDatabaseURL
 	}
 
-	if err := migrate.Up(conn); err != nil {
-		_ = conn.Close()
+	if err := migrate.Up(databaseURL); err != nil {
 		return nil, fmt.Errorf("migrate up: %w", err)
 	}
 
-	return conn, nil
+	return Open(ctx)
 }

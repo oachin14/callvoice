@@ -41,8 +41,8 @@ func TestMigrationFilesExistAndAreValidSQL(t *testing.T) {
 	require.Contains(t, string(downSQL), "DROP TABLE")
 }
 
-func TestMigrateUpRequiresDatabase(t *testing.T) {
-	err := migrate.Up(nil)
+func TestMigrateUpRequiresDatabaseURL(t *testing.T) {
+	err := migrate.Up("")
 	require.Error(t, err)
 }
 
@@ -50,8 +50,10 @@ func TestMigrateAndInsertUser(t *testing.T) {
 	conn := testutil.OpenTestDB(t)
 	defer conn.Close()
 
-	require.NoError(t, migrate.Down(conn))
-	require.NoError(t, migrate.Up(conn))
+	databaseURL := testutil.DatabaseURL()
+	require.NoError(t, migrate.Down(databaseURL))
+	require.NoError(t, migrate.Up(databaseURL))
+	require.NoError(t, conn.Ping())
 
 	email := fmt.Sprintf("admin-%s@test.local", t.Name())
 	_, err := conn.Exec(
