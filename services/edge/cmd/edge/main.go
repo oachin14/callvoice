@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/callvoice/callvoice/internal/cryptokit"
 	"github.com/callvoice/callvoice/services/edge/internal/agent"
+	"github.com/callvoice/callvoice/services/edge/internal/cpsgate"
+	"github.com/callvoice/callvoice/services/edge/internal/dialer"
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
 	"github.com/callvoice/callvoice/services/edge/internal/httpapi"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
@@ -102,10 +105,25 @@ func main() {
 		if raw := os.Getenv("REQUIRE_ADMIN_2FA"); raw != "" {
 			requireAdmin2FA = raw == "1" || strings.EqualFold(raw, "true")
 		}
+		globalCPS := 0
+		if raw := os.Getenv("GLOBAL_MAX_CPS"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				globalCPS = n
+			}
+		}
+		carrierLoader := &fs.CarrierLoader{DB: db}
+		manualDialer := &dialer.Manual{
+			ESL:          esl,
+			Gate:         cpsgate.New(rdb),
+			RDB:          rdb,
+			Carriers:     carrierLoader,
+			GlobalMaxCPS: globalCPS,
+		}
 		agentSrv := &httpapi.AgentServer{
 			DB:              db,
 			Pres:            pres,
 			RequireAdmin2FA: requireAdmin2FA,
+			Dialer:          manualDialer,
 			Creds: &webrtccred.Provisioner{
 				ESL:          esl,
 				DirectoryDir: directoryDir,

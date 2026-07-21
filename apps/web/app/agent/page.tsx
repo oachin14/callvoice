@@ -14,6 +14,9 @@ export default function AgentConsolePage() {
   const [webrtc, setWebrtc] = useState<WebRTCConfig | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dialTo, setDialTo] = useState("");
+  const [callUUID, setCallUUID] = useState<string | null>(null);
+  const [inCall, setInCall] = useState(false);
 
   async function ensureUser() {
     if (user) return user;
@@ -44,9 +47,18 @@ export default function AgentConsolePage() {
     setError("");
     setBusy(true);
     try {
+      if (inCall) {
+        try {
+          await edgeApi("/calls/hangup", { method: "POST", body: JSON.stringify({}) });
+        } catch {
+          /* best-effort */
+        }
+      }
       await edgeApi("/agent/session/stop", { method: "POST" });
       setPresence("offline");
       setWebrtc(null);
+      setInCall(false);
+      setCallUUID(null);
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
@@ -83,13 +95,50 @@ export default function AgentConsolePage() {
     }
   }
 
+  async function onCall() {
+    setError("");
+    setBusy(true);
+    try {
+      const res = await edgeApi<{ status: string; call_uuid: string }>(
+        "/calls/outbound",
+        {
+          method: "POST",
+          body: JSON.stringify({ to: dialTo.trim() }),
+        },
+      );
+      setCallUUID(res.call_uuid);
+      setInCall(true);
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onHangup() {
+    setError("");
+    setBusy(true);
+    try {
+      await edgeApi("/calls/hangup", {
+        method: "POST",
+        body: JSON.stringify(callUUID ? { uuid: callUUID } : {}),
+      });
+      setInCall(false);
+      setCallUUID(null);
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className={styles.page}>
       <header className={styles.header}>
         <p className={styles.brand}>CallVoice</p>
         <h1 className={styles.title}>Console agent</h1>
         <p className={styles.sub}>
-          Session WebRTC (stub) — softphone SIP.js arrive au jalon suivant.
+          Session WebRTC + appel sortant manuel (originate serveur).
         </p>
         <Link className={styles.link} href="/login">
           Connexion
@@ -99,6 +148,7 @@ export default function AgentConsolePage() {
       <section className={styles.panel}>
         <p className={styles.status}>
           État : <strong>{presence}</strong>
+          {inCall ? " · en appel" : ""}
           {user ? ` · ${user.email}` : ""}
         </p>
         {error ? <p className={styles.error}>{error}</p> : null}
@@ -114,11 +164,11 @@ export default function AgentConsolePage() {
                 Se déconnecter
               </button>
               {presence === "available" ? (
-                <button type="button" disabled={busy} onClick={() => setState("paused")}>
+                <button type="button" disabled={busy || inCall} onClick={() => setState("paused")}>
                   Pause
                 </button>
               ) : (
-                <button type="button" disabled={busy} onClick={() => setState("available")}>
+                <button type="button" disabled={busy || inCall} onClick={() => setState("available")}>
                   Disponible
                 </button>
               )}
@@ -128,6 +178,34 @@ export default function AgentConsolePage() {
             </>
           )}
         </div>
+
+        {presence !== "offline" ? (
+          <div className={styles.dial}>
+            <label className={styles.dialLabel} htmlFor="dial-to">
+              Numéro (E.164)
+            </label>
+            <div className={styles.dialRow}>
+              <input
+                id="dial-to"
+                type="tel"
+                className={styles.dialInput}
+                placeholder="+33123456789"
+                value={dialTo}
+                onChange={(e) => setDialTo(e.target.value)}
+                disabled={busy || inCall}
+              />
+              {!inCall ? (
+                <button type="button" disabled={busy || !dialTo.trim()} onClick={onCall}>
+                  Appeler
+                </button>
+              ) : (
+                <button type="button" disabled={busy} onClick={onHangup}>
+                  Raccrocher
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
 
         {webrtc ? (
           <pre className={styles.creds} aria-label="Configuration WebRTC">

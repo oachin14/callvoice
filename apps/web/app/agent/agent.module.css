@@ -80,6 +80,48 @@
   color: #0b3d4a;
 }
 
+.dial {
+  margin-bottom: 1.25rem;
+}
+
+.dialLabel {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  color: #4a5c66;
+}
+
+.dialRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.dialInput {
+  flex: 1 1 12rem;
+  min-width: 0;
+  border: 1px solid rgba(11, 61, 74, 0.35);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  color: #142028;
+}
+
+.dialRow button {
+  appearance: none;
+  border: 1px solid #1a4a58;
+  background: #0b3d4a;
+  color: #f4f8f9;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.dialRow button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .creds {
   margin: 0;
   padding: 1rem;

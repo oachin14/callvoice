@@ -12,6 +12,7 @@ import (
 	"github.com/callvoice/callvoice/internal/authkit"
 	"github.com/callvoice/callvoice/internal/models"
 	"github.com/callvoice/callvoice/services/edge/internal/agent"
+	"github.com/callvoice/callvoice/services/edge/internal/dialer"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
@@ -21,21 +22,23 @@ type ctxKey int
 
 const userCtxKey ctxKey = 1
 
-// AgentServer serves agent presence and WebRTC credential endpoints.
+// AgentServer serves agent presence, WebRTC credentials, and outbound call endpoints.
 type AgentServer struct {
 	DB              *sql.DB
 	Pres            *agent.Presence
 	Creds           *webrtccred.Provisioner
+	Dialer          *dialer.Manual
 	CORS            []string
 	RequireAdmin2FA bool
 }
 
-// Mount registers agent routes on mux.
+// Mount registers agent and call routes on mux.
 func (s *AgentServer) Mount(mux *http.ServeMux) {
 	mux.Handle("POST /agent/session/start", s.withAuth(s.handleStart))
 	mux.Handle("POST /agent/session/stop", s.withAuth(s.handleStop))
 	mux.Handle("POST /agent/state", s.withAuth(s.handleState))
 	mux.Handle("GET /agent/webrtc-config", s.withAuth(s.handleWebRTCConfig))
+	s.MountCalls(mux)
 }
 
 // CORSMiddleware allows credentialed browser calls from configured origins.
