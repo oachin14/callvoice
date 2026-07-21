@@ -34,16 +34,18 @@ func (s *AgentServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	user := userFrom(r.Context())
-	ch := s.Hub.Subscribe()
-	defer s.Hub.Unsubscribe(ch)
+	userID := user.ID.String()
+	ch := s.Hub.Subscribe(userID)
+	defer s.Hub.Unsubscribe(userID, ch)
 
 	// Initial hello so clients know the socket is authenticated.
 	_ = writeWSEvent(conn, live.Event{
 		Type: live.TypeAgentState,
 		Payload: map[string]any{
-			"user_id": user.ID.String(),
-			"state":   "subscribed",
-			"email":   user.Email,
+			"user_id":  userID,
+			"agent_id": userID,
+			"state":    "subscribed",
+			"email":    user.Email,
 		},
 	})
 
@@ -109,18 +111,26 @@ func (s *AgentServer) publishAgentState(userID, state string, extra map[string]a
 		return
 	}
 	payload := map[string]any{
-		"user_id": userID,
-		"state":   state,
+		"user_id":  userID,
+		"agent_id": userID,
+		"state":    state,
 	}
 	for k, v := range extra {
 		payload[k] = v
 	}
-	s.Hub.Broadcast(live.Event{Type: live.TypeAgentState, Payload: payload})
+	s.Hub.Broadcast(userID, live.Event{Type: live.TypeAgentState, Payload: payload})
 }
 
-func (s *AgentServer) publishCallState(payload map[string]any) {
+func (s *AgentServer) publishCallState(userID string, payload map[string]any) {
 	if s.Hub == nil {
 		return
 	}
-	s.Hub.Broadcast(live.Event{Type: live.TypeCallState, Payload: payload})
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["user_id"] = userID
+	if _, ok := payload["agent_id"]; !ok {
+		payload["agent_id"] = userID
+	}
+	s.Hub.Broadcast(userID, live.Event{Type: live.TypeCallState, Payload: payload})
 }

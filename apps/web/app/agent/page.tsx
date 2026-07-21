@@ -28,6 +28,7 @@ export default function AgentConsolePage() {
 
   const softphoneRef = useRef<Softphone | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const userIdRef = useRef<string | null>(null);
   const expectOutboundInvite = useRef(false);
   const outboundInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceRef = useRef<"available" | "paused">("available");
@@ -81,6 +82,10 @@ export default function AgentConsolePage() {
     softphoneRef.current?.setRemoteAudio(audioRef.current);
   }, []);
 
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user]);
+
   // Live statuses from edge GET /ws (cookie auth; wait for API session).
   useEffect(() => {
     const edgeBase = process.env.NEXT_PUBLIC_EDGE_URL ?? "http://localhost:8081";
@@ -88,6 +93,19 @@ export default function AgentConsolePage() {
     let ws: WebSocket | null = null;
     let closed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function liveEventUserId(payload: Record<string, unknown>): string | null {
+      const raw = payload.user_id ?? payload.agent_id;
+      return raw != null ? String(raw) : null;
+    }
+
+    function isOwnLiveEvent(payload: Record<string, unknown> | undefined): boolean {
+      if (!payload) return false;
+      const mine = userIdRef.current;
+      const from = liveEventUserId(payload);
+      if (!from) return true;
+      return mine != null && from === mine;
+    }
 
     function openSocket() {
       if (closed) return;
@@ -99,6 +117,7 @@ export default function AgentConsolePage() {
             payload?: Record<string, unknown>;
           };
           if (ev.type === "agent.state" && ev.payload) {
+            if (!isOwnLiveEvent(ev.payload)) return;
             const state = String(ev.payload.state ?? "");
             if (state === "available" || state === "paused") {
               setPresence(state);
@@ -111,6 +130,7 @@ export default function AgentConsolePage() {
             }
           }
           if (ev.type === "call.state" && ev.payload) {
+            if (!isOwnLiveEvent(ev.payload)) return;
             const state = String(ev.payload.state ?? "");
             const uuid = ev.payload.call_uuid != null ? String(ev.payload.call_uuid) : "";
             if (state === "active" && uuid) {
@@ -140,6 +160,7 @@ export default function AgentConsolePage() {
       if (closed) return;
       try {
         const me = await api<User>("/auth/me");
+        userIdRef.current = me.id;
         setUser(me);
       } catch {
         retryTimer = setTimeout(() => {
