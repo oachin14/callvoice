@@ -1,0 +1,90 @@
+.page {
+  min-height: 100vh;
+  padding: 2.5rem 1.5rem 3rem;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(30, 90, 120, 0.12), transparent),
+    linear-gradient(165deg, #f0f4f6 0%, #e4ebe8 45%, #dce6ea 100%);
+  color: #142028;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.header {
+  max-width: 40rem;
+  margin: 0 auto 2rem;
+}
+
+.brand {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0b3d4a;
+}
+
+.title {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.sub {
+  margin: 0 0 0.75rem;
+  color: #4a5c66;
+  font-size: 0.95rem;
+}
+
+.link {
+  color: #0b3d4a;
+  font-size: 0.9rem;
+}
+
+.panel {
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+.status {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+}
+
+.error {
+  color: #8b1e1e;
+  margin: 0 0 1rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
+.actions button {
+  appearance: none;
+  border: 1px solid #1a4a58;
+  background: #0b3d4a;
+  color: #f4f8f9;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.actions button:nth-child(n + 2) {
+  background: transparent;
+  color: #0b3d4a;
+}
+
+.creds {
+  margin: 0;
+  padding: 1rem;
+  background: rgba(11, 61, 74, 0.06);
+  border: 1px solid rgba(11, 61, 74, 0.18);
+  font-size: 0.8rem;
+  overflow-x: auto;
+}

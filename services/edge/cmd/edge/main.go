@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,7 +16,10 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/callvoice/callvoice/internal/cryptokit"
+	"github.com/callvoice/callvoice/services/edge/internal/agent"
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
+	"github.com/callvoice/callvoice/services/edge/internal/httpapi"
+	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
 func main() {
@@ -31,10 +35,14 @@ func main() {
 	eslAddr := envOr("FREESWITCH_ESL_ADDR", "127.0.0.1:8021")
 	eslPass := envOr("FREESWITCH_ESL_PASSWORD", "ClueCon")
 	gatewayDir := envOr("FREESWITCH_GATEWAY_DIR", "/etc/freeswitch/gateways")
+	directoryDir := envOr("FREESWITCH_DIRECTORY_DIR", "/etc/freeswitch/directory/default")
+	wssURL := envOr("FREESWITCH_WSS_URL", "wss://localhost:7443")
+	sipDomain := envOr("FREESWITCH_SIP_DOMAIN", "localhost")
 
 	esl := fs.NewClient(eslAddr, eslPass)
 	go esl.RunReconnect(ctx)
 
+	var db *sql.DB
 	var reloader *fs.Reloader
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		keyRaw := os.Getenv("CARRIER_SECRET_KEY")
@@ -45,9 +53,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("CARRIER_SECRET_KEY: %v", err)
 		}
-		db, err := sql.Open("postgres", dbURL)
-		if err != nil {
-			log.Fatalf("database: %v", err)
+		var errDB error
+		db, errDB = sql.Open("postgres", dbURL)
+		if errDB != nil {
+			log.Fatalf("database: %v", errDB)
 		}
 		db.SetMaxOpenConns(5)
 		db.SetConnMaxLifetime(time.Minute)
@@ -58,7 +67,6 @@ func main() {
 			SecretKey:  key,
 		}
 		go func() {
-			// Wait briefly for ESL reconnect before first apply.
 			select {
 			case <-ctx.Done():
 				return
@@ -71,19 +79,43 @@ func main() {
 			}
 		}()
 	} else {
-		log.Printf("DATABASE_URL unset; skipping BYOC gateway apply")
+		log.Printf("DATABASE_URL unset; skipping BYOC gateway apply and agent auth")
 	}
 
-	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" && reloader != nil {
+	var rdb *redis.Client
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
 		opt, err := redis.ParseURL(redisURL)
 		if err != nil {
 			log.Fatalf("REDIS_URL: %v", err)
 		}
-		rdb := redis.NewClient(opt)
-		go subscribeCarriersChanged(ctx, rdb, reloader)
+		rdb = redis.NewClient(opt)
+		if reloader != nil {
+			go subscribeCarriersChanged(ctx, rdb, reloader)
+		}
 	}
 
-	srv := &http.Server{Addr: ":8081", Handler: mux}
+	var handler http.Handler = mux
+	if db != nil && rdb != nil {
+		agentSrv := &httpapi.AgentServer{
+			DB:   db,
+			Pres: agent.NewPresence(rdb),
+			Creds: &webrtccred.Provisioner{
+				ESL:          esl,
+				DirectoryDir: directoryDir,
+				WSSURL:       wssURL,
+				SIPDomain:    sipDomain,
+				ICEServers:   []webrtccred.ICEServer{},
+				RDB:          rdb,
+			},
+			CORS: splitCSV(envOr("CORS_ORIGINS", "http://localhost:3000")),
+		}
+		agentSrv.Mount(mux)
+		handler = agentSrv.CORSMiddleware(mux)
+	} else {
+		log.Printf("agent routes disabled (need DATABASE_URL + REDIS_URL)")
+	}
+
+	srv := &http.Server{Addr: ":8081", Handler: handler}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -92,7 +124,8 @@ func main() {
 		esl.Close()
 	}()
 
-	log.Printf("edge listening on :8081 (esl=%s gateway_dir=%s)", eslAddr, gatewayDir)
+	log.Printf("edge listening on :8081 (esl=%s gateway_dir=%s directory_dir=%s wss=%s)",
+		eslAddr, gatewayDir, directoryDir, wssURL)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -125,4 +158,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

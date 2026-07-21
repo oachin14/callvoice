@@ -20,6 +20,7 @@ services:
     ports: ["127.0.0.1:8021:8021"]
     volumes:
       - fs_gateways:/etc/freeswitch/gateways
+      - fs_directory:/etc/freeswitch/directory/default
   api:
     build:
       context: .
@@ -48,9 +49,14 @@ services:
       FREESWITCH_ESL_ADDR: freeswitch:8021
       FREESWITCH_ESL_PASSWORD: ClueCon
       FREESWITCH_GATEWAY_DIR: /etc/freeswitch/gateways
+      FREESWITCH_DIRECTORY_DIR: /etc/freeswitch/directory/default
+      FREESWITCH_WSS_URL: wss://localhost:7443
+      FREESWITCH_SIP_DOMAIN: localhost
+      CORS_ORIGINS: http://localhost:3000
       API_BASE_URL: http://api:8080
     volumes:
       - fs_gateways:/etc/freeswitch/gateways
+      - fs_directory:/etc/freeswitch/directory/default
     depends_on: [redis, freeswitch, api, postgres]
   web:
     build: ./apps/web
@@ -62,3 +68,4 @@ services:
 
 volumes:
   fs_gateways:
+  fs_directory:

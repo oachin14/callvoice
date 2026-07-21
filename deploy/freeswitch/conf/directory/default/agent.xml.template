@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ephemeral WebRTC agent directory user.
+     Placeholders: {{SIP_USER}} {{PASSWORD}}
+     Edge writes agent-{uuid}.xml then ESL reloadxml. TTL ~2h. -->
+<include>
+  <user id="{{SIP_USER}}">
+    <params>
+      <param name="password" value="{{PASSWORD}}"/>
+      <param name="vm-password" value="{{PASSWORD}}"/>
+    </params>
+    <variables>
+      <variable name="user_context" value="default"/>
+      <variable name="effective_caller_id_name" value="{{SIP_USER}}"/>
+      <variable name="effective_caller_id_number" value="{{SIP_USER}}"/>
+    </variables>
+  </user>
+</include>
