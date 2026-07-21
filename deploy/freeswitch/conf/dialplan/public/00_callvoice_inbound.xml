@@ -1,0 +1,11 @@
+<include>
+  <!-- Lab inbound DID: notify edge via CUSTOM callvoice::inbound, then park for routing. -->
+  <extension name="callvoice_inbound_did">
+    <condition field="destination_number" expression="^(\+?[0-9]{8,15})$">
+      <action application="set" data="callvoice_did=$1"/>
+      <action application="export" data="callvoice_did=$1"/>
+      <action application="event" data="Event-Subclass=callvoice::inbound,Event-Name=CUSTOM,callvoice_did=$1"/>
+      <action application="park"/>
+    </condition>
+  </extension>
+</include>

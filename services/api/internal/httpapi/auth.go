@@ -131,6 +131,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/carriers", s.handleCreateCarrier)
 			r.Patch("/carriers/{id}", s.handlePatchCarrier)
 			r.Delete("/carriers/{id}", s.handleDeleteCarrier)
+			r.Post("/dids", s.handleCreateDID)
 		})
 	})
 

@@ -22,6 +22,7 @@ import (
 	"github.com/callvoice/callvoice/services/edge/internal/dialer"
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
 	"github.com/callvoice/callvoice/services/edge/internal/httpapi"
+	"github.com/callvoice/callvoice/services/edge/internal/inbound"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
@@ -138,6 +139,13 @@ func main() {
 		}
 		agentSrv.Mount(mux)
 		handler = agentSrv.CORSMiddleware(mux)
+
+		inboundRouter := &inbound.Router{
+			RDB:  rdb,
+			DIDs: &inbound.DIDLoader{DB: db},
+			ESL:  esl,
+		}
+		go inbound.RunListener(ctx, eslAddr, eslPass, inboundRouter, nil)
 	} else {
 		log.Printf("agent routes disabled (need DATABASE_URL + REDIS_URL)")
 	}

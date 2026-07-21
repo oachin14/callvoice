@@ -20,8 +20,8 @@ var labDIDs = []struct {
 	number      string
 	destination string
 }{
-	{"+33123456789", "queue:default"},
-	{"+33987654321", "queue:default"},
+	{"+33123456789", "agent_pool:default"},
+	{"+33987654321", "agent_pool:default"},
 }
 
 func main() {
