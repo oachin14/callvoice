@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
+
+const DefaultTTL = 2 * time.Hour
 
 // Agent presence states stored in Redis.
 type State string
@@ -26,11 +29,15 @@ var ErrInvalidState = errors.New("invalid agent state")
 // Presence tracks live agent availability in Redis.
 type Presence struct {
 	rdb *redis.Client
+	ttl time.Duration
 }
 
 // NewPresence returns a Redis-backed presence store.
-func NewPresence(rdb *redis.Client) *Presence {
-	return &Presence{rdb: rdb}
+func NewPresence(rdb *redis.Client, ttl time.Duration) *Presence {
+	if ttl <= 0 {
+		ttl = DefaultTTL
+	}
+	return &Presence{rdb: rdb, ttl: ttl}
 }
 
 // Key returns the Redis key for an agent's presence.
@@ -40,7 +47,7 @@ func Key(userID uuid.UUID) string {
 
 // Start registers the agent as available.
 func (p *Presence) Start(ctx context.Context, userID uuid.UUID) error {
-	return p.rdb.Set(ctx, Key(userID), string(StateAvailable), 0).Err()
+	return p.rdb.Set(ctx, Key(userID), string(StateAvailable), p.ttl).Err()
 }
 
 // Stop clears the agent presence key.
@@ -72,7 +79,7 @@ func (p *Presence) SetState(ctx context.Context, userID uuid.UUID, state State) 
 	if n == 0 {
 		return ErrNotFound
 	}
-	if err := p.rdb.Set(ctx, Key(userID), string(state), 0).Err(); err != nil {
+	if err := p.rdb.Set(ctx, Key(userID), string(state), p.ttl).Err(); err != nil {
 		return fmt.Errorf("set presence: %w", err)
 	}
 	return nil

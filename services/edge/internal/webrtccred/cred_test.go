@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/callvoice/callvoice/services/edge/internal/agent"
 	"github.com/callvoice/callvoice/services/edge/internal/webrtccred"
 )
 
@@ -91,25 +92,34 @@ func TestRevokeRemovesXML(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer rdb.Close()
 
+	pres := agent.NewPresence(rdb, agent.DefaultTTL)
 	p := &webrtccred.Provisioner{
 		ESL:          esl,
 		DirectoryDir: dir,
 		WSSURL:       "wss://localhost:7443",
 		SIPDomain:    "localhost",
 		RDB:          rdb,
+		Pres:         pres,
 	}
 	uid := uuid.New()
-	if _, err := p.Issue(context.Background(), uid); err != nil {
+	ctx := context.Background()
+	if _, err := p.Issue(ctx, uid); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if err := p.Revoke(context.Background(), uid); err != nil {
+	if err := pres.Start(ctx, uid); err != nil {
+		t.Fatalf("Start presence: %v", err)
+	}
+	if err := p.Revoke(ctx, uid); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	path := filepath.Join(dir, "agent-"+uid.String()+".xml")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("xml still present: %v", err)
 	}
-	if _, err := p.Get(context.Background(), uid); err != webrtccred.ErrNoCreds {
+	if _, err := p.Get(ctx, uid); err != webrtccred.ErrNoCreds {
 		t.Fatalf("Get after revoke: %v", err)
+	}
+	if _, err := pres.Get(ctx, uid); err != agent.ErrNotFound {
+		t.Fatalf("presence after revoke: %v", err)
 	}
 }

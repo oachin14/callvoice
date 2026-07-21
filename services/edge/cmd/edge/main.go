@@ -96,16 +96,25 @@ func main() {
 
 	var handler http.Handler = mux
 	if db != nil && rdb != nil {
+		sessionTTL := 2 * time.Hour
+		pres := agent.NewPresence(rdb, sessionTTL)
+		requireAdmin2FA := true
+		if raw := os.Getenv("REQUIRE_ADMIN_2FA"); raw != "" {
+			requireAdmin2FA = raw == "1" || strings.EqualFold(raw, "true")
+		}
 		agentSrv := &httpapi.AgentServer{
-			DB:   db,
-			Pres: agent.NewPresence(rdb),
+			DB:              db,
+			Pres:            pres,
+			RequireAdmin2FA: requireAdmin2FA,
 			Creds: &webrtccred.Provisioner{
 				ESL:          esl,
 				DirectoryDir: directoryDir,
 				WSSURL:       wssURL,
 				SIPDomain:    sipDomain,
 				ICEServers:   []webrtccred.ICEServer{},
+				TTL:          sessionTTL,
 				RDB:          rdb,
+				Pres:         pres,
 			},
 			CORS: splitCSV(envOr("CORS_ORIGINS", "http://localhost:3000")),
 		}

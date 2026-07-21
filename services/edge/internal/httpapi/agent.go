@@ -23,10 +23,11 @@ const userCtxKey ctxKey = 1
 
 // AgentServer serves agent presence and WebRTC credential endpoints.
 type AgentServer struct {
-	DB     *sql.DB
-	Pres   *agent.Presence
-	Creds  *webrtccred.Provisioner
-	CORS   []string
+	DB              *sql.DB
+	Pres            *agent.Presence
+	Creds           *webrtccred.Provisioner
+	CORS            []string
+	RequireAdmin2FA bool
 }
 
 // Mount registers agent routes on mux.
@@ -72,9 +73,17 @@ func (s *AgentServer) withAuth(next http.HandlerFunc) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
+		if s.adminTOTPSetupRequired(user) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "totp_setup_required"})
+			return
+		}
 		ctx := context.WithValue(r.Context(), userCtxKey, user)
 		next(w, r.WithContext(ctx))
 	})
+}
+
+func (s *AgentServer) adminTOTPSetupRequired(user *models.User) bool {
+	return s.RequireAdmin2FA && user.Role == models.UserRoleAdmin && !user.TOTPEnabled
 }
 
 func userFrom(ctx context.Context) *models.User {

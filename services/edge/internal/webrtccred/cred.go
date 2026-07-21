@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/callvoice/callvoice/services/edge/internal/agent"
 	"github.com/callvoice/callvoice/services/edge/internal/fs"
 )
 
@@ -56,6 +57,7 @@ type Provisioner struct {
 	ICEServers   []ICEServer
 	TTL          time.Duration
 	RDB          *redis.Client
+	Pres         *agent.Presence
 	Now          func() time.Time
 }
 
@@ -100,6 +102,9 @@ func (p *Provisioner) Revoke(ctx context.Context, userID uuid.UUID) error {
 	_ = os.Remove(filepath.Join(p.DirectoryDir, sipUser+".xml"))
 	_, _ = p.ESL.API("reloadxml")
 	_ = p.RDB.Del(ctx, credKey(userID)).Err()
+	if p.Pres != nil {
+		_ = p.Pres.Stop(ctx, userID)
+	}
 	return nil
 }
 

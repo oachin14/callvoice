@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -105,9 +106,45 @@ func TestPresenceSetStateRequiresActiveSession(t *testing.T) {
 	}
 }
 
+func TestPresenceStartSetsTTL(t *testing.T) {
+	p, mr, cleanup := newPresenceWithMini(t)
+	defer cleanup()
+
+	uid := uuid.New()
+	ctx := context.Background()
+	if err := p.Start(ctx, uid); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got := mr.TTL(agent.Key(uid)); got != agent.DefaultTTL {
+		t.Fatalf("TTL = %v, want %v", got, agent.DefaultTTL)
+	}
+}
+
+func TestPresenceSetStateRefreshesTTL(t *testing.T) {
+	p, mr, cleanup := newPresenceWithMini(t)
+	defer cleanup()
+
+	uid := uuid.New()
+	ctx := context.Background()
+	_ = p.Start(ctx, uid)
+	mr.FastForward(agent.DefaultTTL - time.Minute)
+	if err := p.SetState(ctx, uid, agent.StatePaused); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+	if got := mr.TTL(agent.Key(uid)); got < agent.DefaultTTL-time.Minute {
+		t.Fatalf("TTL after SetState = %v, expected refresh near %v", got, agent.DefaultTTL)
+	}
+}
+
 func newPresence(t *testing.T) (*agent.Presence, func()) {
+	t.Helper()
+	p, _, cleanup := newPresenceWithMini(t)
+	return p, cleanup
+}
+
+func newPresenceWithMini(t *testing.T) (*agent.Presence, *miniredis.Miniredis, func()) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	return agent.NewPresence(rdb), func() { _ = rdb.Close() }
+	return agent.NewPresence(rdb, agent.DefaultTTL), mr, func() { _ = rdb.Close() }
 }
