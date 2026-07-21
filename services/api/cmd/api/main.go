@@ -27,6 +27,9 @@ func main() {
 	if os.Getenv("COOKIE_SECURE") == "" {
 		_ = os.Setenv("COOKIE_SECURE", "false")
 	}
+	if os.Getenv("CARRIER_SECRET_KEY") == "" {
+		_ = os.Setenv("CARRIER_SECRET_KEY", "0123456789abcdef0123456789abcdef")
+	}
 
 	srv, err := httpapi.NewServer(conn)
 	if err != nil {

@@ -33,11 +33,13 @@ func setupAuthServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	require.NoError(t, migrate.Up(databaseURL))
 
 	srv := &httpapi.Server{
-		DB:            conn,
-		SessionSecret: []byte("dev-session-secret-change-me-32b!!"),
-		SessionTTL:    24 * time.Hour,
-		CookieSecure:  false,
-		Now:           time.Now,
+		DB:               conn,
+		SessionSecret:    []byte("dev-session-secret-change-me-32b!!"),
+		CarrierSecretKey: []byte("0123456789abcdef0123456789abcdef"),
+		SessionTTL:       24 * time.Hour,
+		CookieSecure:     false,
+		RequireAdmin2FA:  true,
+		Now:              time.Now,
 	}
 	ts := httptest.NewServer(srv.Routes())
 	t.Cleanup(ts.Close)
@@ -46,11 +48,17 @@ func setupAuthServer(t *testing.T) (*httptest.Server, *sql.DB) {
 
 func insertUser(t *testing.T, db *sql.DB, email, password string, totpEnabled bool) {
 	t.Helper()
+	insertUserRole(t, db, email, password, "agent", totpEnabled, nil)
+}
+
+func insertUserRole(t *testing.T, db *sql.DB, email, password, role string, totpEnabled bool, totpSecretEnc []byte) {
+	t.Helper()
 	hash, err := authkit.HashPassword(password)
 	require.NoError(t, err)
 	_, err = db.Exec(
-		`INSERT INTO users (email, password_hash, role, totp_enabled) VALUES (lower($1), $2, 'agent', $3)`,
-		email, hash, totpEnabled,
+		`INSERT INTO users (email, password_hash, role, totp_enabled, totp_secret_encrypted)
+		 VALUES (lower($1), $2, $3, $4, $5)`,
+		email, hash, role, totpEnabled, totpSecretEnc,
 	)
 	require.NoError(t, err)
 }

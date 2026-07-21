@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/callvoice/callvoice/internal/authkit"
+	"github.com/callvoice/callvoice/internal/cryptokit"
 	"github.com/callvoice/callvoice/internal/models"
 )
 
@@ -35,11 +36,13 @@ const userContextKey contextKey = "user"
 
 // Server hosts auth HTTP handlers.
 type Server struct {
-	DB            *sql.DB
-	SessionSecret []byte
-	SessionTTL    time.Duration
-	CookieSecure  bool
-	Now           func() time.Time
+	DB               *sql.DB
+	SessionSecret    []byte
+	CarrierSecretKey []byte
+	SessionTTL       time.Duration
+	CookieSecure     bool
+	RequireAdmin2FA  bool
+	Now              func() time.Time
 }
 
 // NewServer builds an API server from environment defaults.
@@ -47,6 +50,15 @@ func NewServer(db *sql.DB) (*Server, error) {
 	secret := os.Getenv("SESSION_SECRET")
 	if len(secret) < 32 {
 		return nil, errors.New("SESSION_SECRET must be at least 32 bytes")
+	}
+
+	carrierKeyRaw := os.Getenv("CARRIER_SECRET_KEY")
+	if carrierKeyRaw == "" {
+		return nil, errors.New("CARRIER_SECRET_KEY is required (32-byte raw or 64 hex chars; also encrypts TOTP secrets)")
+	}
+	carrierKey, err := cryptokit.ParseKey(carrierKeyRaw)
+	if err != nil {
+		return nil, errors.New("CARRIER_SECRET_KEY must be 32 raw bytes or 64 hex characters")
 	}
 
 	ttl := defaultSessionTTL
@@ -63,12 +75,19 @@ func NewServer(db *sql.DB) (*Server, error) {
 		secure = raw == "1" || strings.EqualFold(raw, "true")
 	}
 
+	requireAdmin2FA := true
+	if raw := os.Getenv("REQUIRE_ADMIN_2FA"); raw != "" {
+		requireAdmin2FA = raw == "1" || strings.EqualFold(raw, "true")
+	}
+
 	return &Server{
-		DB:            db,
-		SessionSecret: []byte(secret),
-		SessionTTL:    ttl,
-		CookieSecure:  secure,
-		Now:           time.Now,
+		DB:               db,
+		SessionSecret:    []byte(secret),
+		CarrierSecretKey: carrierKey,
+		SessionTTL:       ttl,
+		CookieSecure:     secure,
+		RequireAdmin2FA:  requireAdmin2FA,
+		Now:              time.Now,
 	}, nil
 }
 
@@ -82,7 +101,10 @@ func (s *Server) Routes() http.Handler {
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/login", s.handleLogin)
 		r.Post("/logout", s.handleLogout)
+		r.Post("/2fa/verify", s.handleTOTPVerify)
 		r.With(s.RequireSession).Get("/me", s.handleMe)
+		r.With(s.RequireSession).Post("/2fa/setup", s.handleTOTPSetup)
+		r.With(s.RequireSession).Post("/2fa/enable", s.handleTOTPEnable)
 	})
 
 	return r
@@ -149,6 +171,27 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, s.cookie(CookiePending, token, pendingTTL))
 		clearCookie(w, CookieSession, s.CookieSecure)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "totp_required"})
+		return
+	}
+
+	// Admins must enroll TOTP before a full session when policy is on.
+	if s.RequireAdmin2FA && user.Role == models.UserRoleAdmin {
+		plain, hash, err := authkit.NewSessionToken()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		expiresAt := now.Add(s.SessionTTL)
+		if err := s.insertSession(r.Context(), user.ID, hash, expiresAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			return
+		}
+		http.SetCookie(w, s.cookie(CookieSession, plain, s.SessionTTL))
+		clearCookie(w, CookiePending, s.CookieSecure)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "totp_setup_required",
+			"user":   toUserResponse(user),
+		})
 		return
 	}
 
