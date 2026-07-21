@@ -180,12 +180,13 @@ type Reloader struct {
 	SecretKey  []byte
 }
 
-// ReloadAll decrypts and applies enabled carriers; removes disabled ones.
+// ReloadAll decrypts and applies enabled carriers; removes disabled and orphan gateways.
 func (r *Reloader) ReloadAll(ctx context.Context) error {
 	carriers, err := r.Loader.ListOrdered(ctx)
 	if err != nil {
 		return fmt.Errorf("list carriers: %w", err)
 	}
+	enabled := make(map[uuid.UUID]struct{}, len(carriers))
 	var firstErr error
 	for _, c := range carriers {
 		if !c.Enabled {
@@ -194,6 +195,7 @@ func (r *Reloader) ReloadAll(ctx context.Context) error {
 			}
 			continue
 		}
+		enabled[c.ID] = struct{}{}
 		password := ""
 		if len(c.PasswordEncrypted) > 0 {
 			pt, err := cryptokit.Decrypt(r.SecretKey, c.PasswordEncrypted)
@@ -207,6 +209,38 @@ func (r *Reloader) ReloadAll(ctx context.Context) error {
 		}
 		if err := ApplyCarrierGateway(r.ESL, r.GatewayDir, c, password); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("apply carrier %s: %w", c.ID, err)
+		}
+	}
+	if err := ReconcileGatewayDirectory(r.ESL, r.GatewayDir, enabled); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+// ReconcileGatewayDirectory removes gateway XML (and unloads via killgw) for any
+// file whose carrier id is not in the enabled set — e.g. carriers deleted from Postgres.
+func ReconcileGatewayDirectory(esl APIClient, gatewayDir string, enabled map[uuid.UUID]struct{}) error {
+	entries, err := os.ReadDir(gatewayDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read gateway dir: %w", err)
+	}
+	var firstErr error
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".xml") {
+			continue
+		}
+		id, err := uuid.Parse(strings.TrimSuffix(e.Name(), ".xml"))
+		if err != nil {
+			continue
+		}
+		if _, ok := enabled[id]; ok {
+			continue
+		}
+		if err := RemoveCarrierGateway(esl, gatewayDir, id); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	return firstErr

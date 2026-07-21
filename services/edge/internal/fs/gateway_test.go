@@ -76,6 +76,36 @@ func TestApplyCarrierGatewayWritesXMLAndRescans(t *testing.T) {
 	}
 }
 
+func TestReconcileGatewayDirectoryRemovesOrphans(t *testing.T) {
+	dir := t.TempDir()
+	esl := &fakeESL{}
+
+	enabledID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	orphanID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+
+	for _, id := range []uuid.UUID{enabledID, orphanID} {
+		path := filepath.Join(dir, id.String()+".xml")
+		if err := os.WriteFile(path, []byte("<include/>"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	enabled := map[uuid.UUID]struct{}{enabledID: {}}
+	if err := fs.ReconcileGatewayDirectory(esl, dir, enabled); err != nil {
+		t.Fatalf("ReconcileGatewayDirectory: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, enabledID.String()+".xml")); err != nil {
+		t.Fatalf("enabled gateway xml should remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, orphanID.String()+".xml")); !os.IsNotExist(err) {
+		t.Fatalf("orphan gateway xml should be removed, stat err=%v", err)
+	}
+	if len(esl.cmds) != 1 || !strings.Contains(esl.cmds[0], "sofia profile external killgw "+orphanID.String()) {
+		t.Fatalf("expected killgw for orphan only, got %v", esl.cmds)
+	}
+}
+
 func TestRemoveCarrierGatewayDeletesXMLAndKillgw(t *testing.T) {
 	dir := t.TempDir()
 	esl := &fakeESL{}

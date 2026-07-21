@@ -31,16 +31,20 @@ func NewClient(addr, password string) *Client {
 
 // ConnectOnce dials and authenticates once.
 func (c *Client) ConnectOnce() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connectLocked()
+}
+
+func (c *Client) connectLocked() error {
 	conn, err := eventsocket.Dial(c.addr, c.password)
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
 	}
 	c.conn = conn
-	c.mu.Unlock()
 	return nil
 }
 
@@ -76,12 +80,6 @@ func (c *Client) RunReconnect(ctx context.Context) {
 			}
 			if _, err := c.API("status"); err != nil {
 				log.Printf("fs esl: connection lost: %v", err)
-				c.mu.Lock()
-				if c.conn != nil {
-					c.conn.Close()
-					c.conn = nil
-				}
-				c.mu.Unlock()
 				break
 			}
 			select {
@@ -95,26 +93,21 @@ func (c *Client) RunReconnect(ctx context.Context) {
 }
 
 // API runs an ESL api command and returns the response body.
+// The mutex is held for the full request/response so concurrent callers
+// (e.g. status keepalive vs ReloadAll) cannot interleave on one connection.
 func (c *Client) API(cmd string) (string, error) {
 	c.mu.Lock()
-	conn := c.conn
-	c.mu.Unlock()
-	if conn == nil {
-		if err := c.ConnectOnce(); err != nil {
+	defer c.mu.Unlock()
+
+	if c.conn == nil {
+		if err := c.connectLocked(); err != nil {
 			return "", err
 		}
-		c.mu.Lock()
-		conn = c.conn
-		c.mu.Unlock()
 	}
-	ev, err := conn.Send("api " + cmd)
+	ev, err := c.conn.Send("api " + cmd)
 	if err != nil {
-		c.mu.Lock()
-		if c.conn == conn {
-			c.conn.Close()
-			c.conn = nil
-		}
-		c.mu.Unlock()
+		c.conn.Close()
+		c.conn = nil
 		return "", err
 	}
 	if ev == nil {

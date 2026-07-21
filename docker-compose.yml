@@ -15,7 +15,6 @@ services:
     ports: ["6379:6379"]
   freeswitch:
     build: ./deploy/freeswitch
-    network_mode: bridge
     # ports intentionally NOT published to host public by default in prod docs;
     # for lab, map ESL only on localhost:
     ports: ["127.0.0.1:8021:8021"]
