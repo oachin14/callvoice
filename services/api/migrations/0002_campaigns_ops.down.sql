@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS call_logs;
+DROP TABLE IF EXISTS leads;
+DROP TABLE IF EXISTS dispositions;
+DROP TABLE IF EXISTS lead_lists;
+DROP TABLE IF EXISTS campaign_agents;
+DROP TABLE IF EXISTS campaigns;
+
+ALTER TABLE users
+  DROP COLUMN IF EXISTS disabled_at,
+  DROP COLUMN IF EXISTS display_name;

@@ -17,28 +17,38 @@ func TestMigrationFilesExistAndAreValidSQL(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
 
-	var upFile, downFile string
+	upFiles := make(map[string]bool)
+	downFiles := make(map[string]bool)
 	for _, entry := range entries {
 		switch {
 		case strings.HasSuffix(entry.Name(), ".up.sql"):
-			upFile = entry.Name()
+			upFiles[entry.Name()] = true
 		case strings.HasSuffix(entry.Name(), ".down.sql"):
-			downFile = entry.Name()
+			downFiles[entry.Name()] = true
 		}
 	}
 
-	require.NotEmpty(t, upFile, "expected at least one .up.sql migration")
-	require.NotEmpty(t, downFile, "expected at least one .down.sql migration")
+	require.NotEmpty(t, upFiles, "expected at least one .up.sql migration")
+	require.NotEmpty(t, downFiles, "expected at least one .down.sql migration")
 
-	upSQL, err := apimigrations.Files.ReadFile(upFile)
+	initUp, err := apimigrations.Files.ReadFile("0001_init.up.sql")
 	require.NoError(t, err)
-	require.Contains(t, string(upSQL), "CREATE TABLE users")
-	require.Contains(t, string(upSQL), "CREATE TABLE carriers")
-	require.Contains(t, string(upSQL), "CREATE TABLE dids")
+	require.Contains(t, string(initUp), "CREATE TABLE users")
+	require.Contains(t, string(initUp), "CREATE TABLE carriers")
+	require.Contains(t, string(initUp), "CREATE TABLE dids")
 
-	downSQL, err := apimigrations.Files.ReadFile(downFile)
+	campaignsUp, err := apimigrations.Files.ReadFile("0002_campaigns_ops.up.sql")
 	require.NoError(t, err)
-	require.Contains(t, string(downSQL), "DROP TABLE")
+	require.Contains(t, string(campaignsUp), "CREATE TABLE campaigns")
+	require.Contains(t, string(campaignsUp), "CREATE TABLE call_logs")
+
+	initDown, err := apimigrations.Files.ReadFile("0001_init.down.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(initDown), "DROP TABLE")
+
+	campaignsDown, err := apimigrations.Files.ReadFile("0002_campaigns_ops.down.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(campaignsDown), "DROP TABLE")
 }
 
 func TestMigrateUpRequiresDatabaseURL(t *testing.T) {
@@ -62,4 +72,32 @@ func TestMigrateAndInsertUser(t *testing.T) {
 		"x",
 	)
 	require.NoError(t, err)
+}
+
+func TestMigrateAndInsertCampaign(t *testing.T) {
+	conn := testutil.OpenTestDB(t)
+	defer conn.Close()
+
+	databaseURL := testutil.DatabaseURL()
+	require.NoError(t, migrate.Up(databaseURL))
+	require.NoError(t, conn.Ping())
+
+	var carrierID string
+	err := conn.QueryRow(
+		`INSERT INTO carriers (name, host) VALUES ($1, $2) RETURNING id`,
+		fmt.Sprintf("carrier-%s", t.Name()),
+		"sip.example.com",
+	).Scan(&carrierID)
+	require.NoError(t, err)
+
+	var campaignID string
+	err = conn.QueryRow(
+		`INSERT INTO campaigns (name, carrier_id, status, dial_mode)
+		 VALUES ($1, $2, 'draft', 'manual')
+		 RETURNING id`,
+		fmt.Sprintf("campaign-%s", t.Name()),
+		carrierID,
+	).Scan(&campaignID)
+	require.NoError(t, err)
+	require.NotEmpty(t, campaignID)
 }
