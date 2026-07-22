@@ -132,6 +132,10 @@ func (s *Server) Routes() http.Handler {
 			r.Patch("/carriers/{id}", s.handlePatchCarrier)
 			r.Delete("/carriers/{id}", s.handleDeleteCarrier)
 			r.Post("/dids", s.handleCreateDID)
+			r.Get("/users", s.handleListUsers)
+			r.Post("/users", s.handleCreateUser)
+			r.Patch("/users/{id}", s.handlePatchUser)
+			r.Post("/users/{id}/reset-password", s.handleResetUserPassword)
 		})
 	})
 
@@ -166,7 +170,9 @@ type userResponse struct {
 	ID          uuid.UUID       `json:"id"`
 	Email       string          `json:"email"`
 	Role        models.UserRole `json:"role"`
+	DisplayName *string         `json:"display_name,omitempty"`
 	TOTPEnabled bool            `json:"totp_enabled"`
+	Disabled    bool            `json:"disabled"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
@@ -193,6 +199,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := s.Now().UTC()
+	if user.DisabledAt != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "account_disabled"})
+		return
+	}
+
 	if user.LockedUntil != nil && user.LockedUntil.After(now) {
 		writeJSON(w, http.StatusLocked, map[string]string{"error": "account_locked"})
 		return
@@ -334,34 +345,56 @@ func UserFromContext(ctx context.Context) *models.User {
 
 func (s *Server) lookupUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	var u models.User
+	var displayName sql.NullString
+	var lockedUntil, disabledAt sql.NullTime
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, email, password_hash, role, totp_secret_encrypted, totp_enabled,
-		       failed_login_count, locked_until, created_at
+		SELECT id, email, password_hash, role, display_name, totp_secret_encrypted, totp_enabled,
+		       failed_login_count, locked_until, disabled_at, created_at
 		FROM users WHERE lower(email) = $1
 	`, email).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.TOTPSecretEncrypted, &u.TOTPEnabled,
-		&u.FailedLoginCount, &u.LockedUntil, &u.CreatedAt,
+		&u.ID, &u.Email, &u.PasswordHash, &u.Role, &displayName, &u.TOTPSecretEncrypted, &u.TOTPEnabled,
+		&u.FailedLoginCount, &lockedUntil, &disabledAt, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if displayName.Valid {
+		u.DisplayName = &displayName.String
+	}
+	if lockedUntil.Valid {
+		u.LockedUntil = &lockedUntil.Time
+	}
+	if disabledAt.Valid {
+		u.DisabledAt = &disabledAt.Time
 	}
 	return &u, nil
 }
 
 func (s *Server) lookupUserBySessionToken(ctx context.Context, plain string) (*models.User, error) {
 	var u models.User
+	var displayName sql.NullString
+	var lockedUntil, disabledAt sql.NullTime
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.role, u.totp_secret_encrypted, u.totp_enabled,
-		       u.failed_login_count, u.locked_until, u.created_at
+		SELECT u.id, u.email, u.password_hash, u.role, u.display_name, u.totp_secret_encrypted, u.totp_enabled,
+		       u.failed_login_count, u.locked_until, u.disabled_at, u.created_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > now()
 	`, authkit.HashToken(plain)).Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.TOTPSecretEncrypted, &u.TOTPEnabled,
-		&u.FailedLoginCount, &u.LockedUntil, &u.CreatedAt,
+		&u.ID, &u.Email, &u.PasswordHash, &u.Role, &displayName, &u.TOTPSecretEncrypted, &u.TOTPEnabled,
+		&u.FailedLoginCount, &lockedUntil, &disabledAt, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if displayName.Valid {
+		u.DisplayName = &displayName.String
+	}
+	if lockedUntil.Valid {
+		u.LockedUntil = &lockedUntil.Time
+	}
+	if disabledAt.Valid {
+		u.DisabledAt = &disabledAt.Time
 	}
 	return &u, nil
 }
@@ -445,7 +478,9 @@ func toUserResponse(u *models.User) userResponse {
 		ID:          u.ID,
 		Email:       u.Email,
 		Role:        u.Role,
+		DisplayName: u.DisplayName,
 		TOTPEnabled: u.TOTPEnabled,
+		Disabled:    u.DisabledAt != nil,
 		CreatedAt:   u.CreatedAt,
 	}
 }
