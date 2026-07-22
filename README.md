@@ -21,6 +21,23 @@ curl -s localhost:8080/healthz   # {"status":"ok"}
 curl -s localhost:8081/healthz   # {"status":"ok"}
 ```
 
+### Demo seed (jalon C)
+
+```bash
+export SEED_ADMIN_PASSWORD=...
+./scripts/seed_jalon_c.sh   # admin + agent@callvoice.local + Demo Campaign + 3 leads
+```
+
+## Web routes (jalon C)
+
+| Route | Role | Description |
+|-------|------|-------------|
+| `/users` | admin | User CRUD |
+| `/campaigns` | admin, supervisor | Campaigns, CSV import, dispositions |
+| `/live` | admin, supervisor | Live wallboard |
+| `/reports` | admin, supervisor | Summary + CSV export |
+| `/agent` | agent (+ admin/supervisor) | Campaign join, lead dial, disposition |
+
 ## Layout
 
 ```
