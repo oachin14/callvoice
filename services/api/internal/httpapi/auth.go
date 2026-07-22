@@ -146,6 +146,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/campaigns/{id}/lists/import", s.handleImportLeadList)
 			r.Get("/campaigns/{id}/dispositions", s.handleListDispositions)
 			r.Post("/campaigns/{id}/dispositions", s.handleCreateDisposition)
+			r.Get("/reports/summary", s.handleReportsSummary)
+			r.Get("/reports/export.csv", s.handleReportsExportCSV)
 		})
 	})
 
