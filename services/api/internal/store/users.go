@@ -17,6 +17,13 @@ import (
 var ErrAdminExists = errors.New("admin already exists")
 var ErrDuplicateEmail = errors.New("duplicate email")
 
+// adminSlotAdvisoryLockKey serializes admin create/promote checks within a transaction.
+const adminSlotAdvisoryLockKey int64 = 7362086
+
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // UserStore persists user rows.
 type UserStore struct {
 	DB *sql.DB
@@ -67,23 +74,43 @@ func (s *UserStore) Get(ctx context.Context, id uuid.UUID) (*models.User, error)
 }
 
 func (s *UserStore) CountAdmins(ctx context.Context) (int, error) {
+	return countAdmins(ctx, s.DB)
+}
+
+func countAdmins(ctx context.Context, q querier) (int, error) {
 	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'admin'`).Scan(&n)
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = 'admin'`).Scan(&n)
 	return n, err
 }
 
+func lockAdminSlot(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, adminSlotAdvisoryLockKey); err != nil {
+		return err
+	}
+	n, err := countAdmins(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrAdminExists
+	}
+	return nil
+}
+
 func (s *UserStore) Create(ctx context.Context, in CreateUserInput) (*models.User, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	if in.Role == models.UserRoleAdmin {
-		n, err := s.CountAdmins(ctx)
-		if err != nil {
+		if err := lockAdminSlot(ctx, tx); err != nil {
 			return nil, err
-		}
-		if n > 0 {
-			return nil, ErrAdminExists
 		}
 	}
 
-	row := s.DB.QueryRowContext(ctx, `
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO users (email, password_hash, role, display_name)
 		VALUES (lower($1), $2, $3, $4)
 		RETURNING `+userReturningCols,
@@ -96,11 +123,32 @@ func (s *UserStore) Create(ctx context.Context, in CreateUserInput) (*models.Use
 		}
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *UserStore) getForUpdate(ctx context.Context, tx *sql.Tx, id uuid.UUID) (*models.User, error) {
+	row := tx.QueryRowContext(ctx, userSelectSQL+` WHERE id = $1 FOR UPDATE`, id)
+	u, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
 	return &u, nil
 }
 
 func (s *UserStore) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput) (*models.User, error) {
-	cur, err := s.Get(ctx, id)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	cur, err := s.getForUpdate(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -118,12 +166,8 @@ func (s *UserStore) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput
 	role := cur.Role
 	if in.Role != nil {
 		if *in.Role == models.UserRoleAdmin && cur.Role != models.UserRoleAdmin {
-			n, err := s.CountAdmins(ctx)
-			if err != nil {
+			if err := lockAdminSlot(ctx, tx); err != nil {
 				return nil, err
-			}
-			if n > 0 {
-				return nil, ErrAdminExists
 			}
 		}
 		role = *in.Role
@@ -143,7 +187,7 @@ func (s *UserStore) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput
 		}
 	}
 
-	row := s.DB.QueryRowContext(ctx, `
+	row := tx.QueryRowContext(ctx, `
 		UPDATE users SET display_name = $2, role = $3, disabled_at = $4
 		WHERE id = $1
 		RETURNING `+userReturningCols,
@@ -152,6 +196,9 @@ func (s *UserStore) Update(ctx context.Context, id uuid.UUID, in UpdateUserInput
 	u, err := scanUser(row)
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return &u, nil
 }

@@ -310,6 +310,11 @@ func (s *Server) RequireSession(next http.Handler) http.Handler {
 			return
 		}
 
+		if user.DisabledAt != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "account_disabled"})
+			return
+		}
+
 		if s.adminTOTPSetupRequired(user) && !admin2FAEnrollmentAllowed(r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "totp_setup_required"})
 			return
