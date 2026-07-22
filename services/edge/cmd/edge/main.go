@@ -125,6 +125,7 @@ func main() {
 		hub := live.NewHub()
 		agentSrv := &httpapi.AgentServer{
 			DB:              db,
+			RDB:             rdb,
 			Pres:            pres,
 			Hub:             hub,
 			RequireAdmin2FA: requireAdmin2FA,

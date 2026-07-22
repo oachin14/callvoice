@@ -54,9 +54,11 @@ type CarrierLister interface {
 
 // OutboundRequest is a server-side manual originate.
 type OutboundRequest struct {
-	AgentID  uuid.UUID
-	To       string
-	CallerID string
+	AgentID    uuid.UUID
+	To         string
+	CallerID   string
+	CampaignID *uuid.UUID
+	LeadID     *uuid.UUID
 }
 
 // OutboundResult is returned after a successful ESL originate.
@@ -187,7 +189,7 @@ func (m *Manual) Originate(ctx context.Context, req OutboundRequest) (*OutboundR
 			continue
 		}
 
-		if err := m.trackCall(ctx, req.AgentID, c.ID, callUUID, req.To); err != nil {
+		if err := m.trackCall(ctx, req, c.ID, callUUID); err != nil {
 			_, _ = m.ESL.API("uuid_kill " + callUUID)
 			return nil, err
 		}
@@ -264,9 +266,12 @@ func (m *Manual) Hangup(ctx context.Context, agentID uuid.UUID, callUUID string)
 }
 
 type callMeta struct {
-	AgentID   string `json:"agent_id"`
-	CarrierID string `json:"carrier_id"`
-	To        string `json:"to"`
+	AgentID    string `json:"agent_id"`
+	CarrierID  string `json:"carrier_id"`
+	To         string `json:"to"`
+	CampaignID string `json:"campaign_id,omitempty"`
+	LeadID     string `json:"lead_id,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
 }
 
 func (m *Manual) channelAvailable(ctx context.Context, c models.Carrier) (bool, error) {
@@ -295,14 +300,21 @@ func (m *Manual) channelCount(ctx context.Context, carrierID uuid.UUID) (int64, 
 	return n, nil
 }
 
-func (m *Manual) trackCall(ctx context.Context, agentID, carrierID uuid.UUID, callUUID, to string) error {
+func (m *Manual) trackCall(ctx context.Context, req OutboundRequest, carrierID uuid.UUID, callUUID string) error {
 	if err := m.RDB.Incr(ctx, ChannelKey(carrierID)).Err(); err != nil {
 		return err
 	}
 	meta := callMeta{
-		AgentID:   agentID.String(),
+		AgentID:   req.AgentID.String(),
 		CarrierID: carrierID.String(),
-		To:        to,
+		To:        req.To,
+		StartedAt: m.now().UTC().Format(time.RFC3339),
+	}
+	if req.CampaignID != nil && *req.CampaignID != uuid.Nil {
+		meta.CampaignID = req.CampaignID.String()
+	}
+	if req.LeadID != nil && *req.LeadID != uuid.Nil {
+		meta.LeadID = req.LeadID.String()
 	}
 	body, err := json.Marshal(meta)
 	if err != nil {
@@ -310,7 +322,7 @@ func (m *Manual) trackCall(ctx context.Context, agentID, carrierID uuid.UUID, ca
 	}
 	pipe := m.RDB.TxPipeline()
 	pipe.Set(ctx, callMetaKey(callUUID), body, 24*time.Hour)
-	pipe.Set(ctx, agentCallKey(agentID), callUUID, 24*time.Hour)
+	pipe.Set(ctx, agentCallKey(req.AgentID), callUUID, 24*time.Hour)
 	_, err = pipe.Exec(ctx)
 	return err
 }

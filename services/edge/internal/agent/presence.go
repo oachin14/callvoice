@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -49,9 +50,57 @@ func Key(userID uuid.UUID) string {
 	return "agent:" + userID.String()
 }
 
+type presenceValue struct {
+	State      State  `json:"state"`
+	CampaignID string `json:"campaign_id,omitempty"`
+}
+
+func parsePresence(raw string) (presenceValue, error) {
+	var v presenceValue
+	if err := json.Unmarshal([]byte(raw), &v); err == nil && v.State != "" {
+		return v, nil
+	}
+	switch State(raw) {
+	case StateAvailable, StatePaused, StateOnCall:
+		return presenceValue{State: State(raw)}, nil
+	default:
+		return presenceValue{}, fmt.Errorf("invalid presence %q", raw)
+	}
+}
+
+func encodePresence(v presenceValue) (string, error) {
+	if v.CampaignID == "" {
+		return string(v.State), nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (p *Presence) readPresence(ctx context.Context, userID uuid.UUID) (presenceValue, error) {
+	val, err := p.rdb.Get(ctx, Key(userID)).Result()
+	if err == redis.Nil {
+		return presenceValue{}, ErrNotFound
+	}
+	if err != nil {
+		return presenceValue{}, err
+	}
+	return parsePresence(val)
+}
+
+func (p *Presence) writePresence(ctx context.Context, userID uuid.UUID, v presenceValue) error {
+	raw, err := encodePresence(v)
+	if err != nil {
+		return err
+	}
+	return p.rdb.Set(ctx, Key(userID), raw, p.ttl).Err()
+}
+
 // Start registers the agent as available.
 func (p *Presence) Start(ctx context.Context, userID uuid.UUID) error {
-	return p.rdb.Set(ctx, Key(userID), string(StateAvailable), p.ttl).Err()
+	return p.writePresence(ctx, userID, presenceValue{State: StateAvailable})
 }
 
 // Stop clears the agent presence key.
@@ -61,14 +110,25 @@ func (p *Presence) Stop(ctx context.Context, userID uuid.UUID) error {
 
 // Get returns the current presence state.
 func (p *Presence) Get(ctx context.Context, userID uuid.UUID) (State, error) {
-	val, err := p.rdb.Get(ctx, Key(userID)).Result()
-	if err == redis.Nil {
-		return "", ErrNotFound
-	}
+	v, err := p.readPresence(ctx, userID)
 	if err != nil {
 		return "", err
 	}
-	return State(val), nil
+	return v.State, nil
+}
+
+// SetCampaign stores the agent's active campaign on the presence record.
+func (p *Presence) SetCampaign(ctx context.Context, userID uuid.UUID, campaignID *uuid.UUID) error {
+	v, err := p.readPresence(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if campaignID == nil || *campaignID == uuid.Nil {
+		v.CampaignID = ""
+	} else {
+		v.CampaignID = campaignID.String()
+	}
+	return p.writePresence(ctx, userID, v)
 }
 
 // SetState updates presence to available or paused. Requires an active session.
@@ -83,10 +143,12 @@ func (p *Presence) SetState(ctx context.Context, userID uuid.UUID, state State) 
 	if n == 0 {
 		return ErrNotFound
 	}
-	if err := p.rdb.Set(ctx, Key(userID), string(state), p.ttl).Err(); err != nil {
-		return fmt.Errorf("set presence: %w", err)
+	v, err := p.readPresence(ctx, userID)
+	if err != nil {
+		return err
 	}
-	return nil
+	v.State = state
+	return p.writePresence(ctx, userID, v)
 }
 
 // ClaimAvailable atomically moves an agent from available → on_call.
@@ -101,11 +163,17 @@ func (p *Presence) ClaimAvailable(ctx context.Context, userID uuid.UUID) (bool, 
 		if err != nil {
 			return err
 		}
-		if State(val) != StateAvailable {
+		v, err := parsePresence(val)
+		if err != nil || v.State != StateAvailable {
 			return errClaimMiss
 		}
+		v.State = StateOnCall
+		raw, err := encodePresence(v)
+		if err != nil {
+			return err
+		}
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.Set(ctx, key, string(StateOnCall), p.ttl)
+			pipe.Set(ctx, key, raw, p.ttl)
 			return nil
 		})
 		return err
@@ -134,11 +202,17 @@ func (p *Presence) ReleaseOnCall(ctx context.Context, userID uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-		if State(val) != StateOnCall {
+		v, err := parsePresence(val)
+		if err != nil || v.State != StateOnCall {
 			return nil
 		}
+		v.State = StateAvailable
+		raw, err := encodePresence(v)
+		if err != nil {
+			return err
+		}
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.Set(ctx, key, string(StateAvailable), p.ttl)
+			pipe.Set(ctx, key, raw, p.ttl)
 			return nil
 		})
 		return err

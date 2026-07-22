@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/callvoice/callvoice/internal/authkit"
 	"github.com/callvoice/callvoice/internal/models"
@@ -26,6 +27,7 @@ const userCtxKey ctxKey = 1
 // AgentServer serves agent presence, WebRTC credentials, and outbound call endpoints.
 type AgentServer struct {
 	DB              *sql.DB
+	RDB             *redis.Client
 	Pres            *agent.Presence
 	Creds           *webrtccred.Provisioner
 	Dialer          *dialer.Manual
@@ -42,6 +44,7 @@ func (s *AgentServer) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /agent/webrtc-config", s.withAuth(s.handleWebRTCConfig))
 	s.MountCalls(mux)
 	s.MountWS(mux)
+	s.MountLiveWS(mux)
 }
 
 // CORSMiddleware allows credentialed browser calls from configured origins.

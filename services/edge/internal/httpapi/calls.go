@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/callvoice/callvoice/services/edge/internal/dialer"
 )
 
@@ -21,18 +23,37 @@ func (s *AgentServer) handleOutbound(w http.ResponseWriter, r *http.Request) {
 	}
 	user := userFrom(r.Context())
 	var body struct {
-		To       string `json:"to"`
-		CallerID string `json:"callerId"`
+		To         string `json:"to"`
+		CallerID   string `json:"callerId"`
+		CampaignID string `json:"campaign_id"`
+		LeadID     string `json:"lead_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 		return
 	}
-	res, err := s.Dialer.Originate(r.Context(), dialer.OutboundRequest{
+	req := dialer.OutboundRequest{
 		AgentID:  user.ID,
 		To:       body.To,
 		CallerID: body.CallerID,
-	})
+	}
+	if body.CampaignID != "" {
+		id, err := uuid.Parse(body.CampaignID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_campaign_id"})
+			return
+		}
+		req.CampaignID = &id
+	}
+	if body.LeadID != "" {
+		id, err := uuid.Parse(body.LeadID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_lead_id"})
+			return
+		}
+		req.LeadID = &id
+	}
+	res, err := s.Dialer.Originate(r.Context(), req)
 	if err != nil {
 		writeOutboundError(w, err)
 		return
