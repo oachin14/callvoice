@@ -5,9 +5,11 @@
   --line: rgba(148, 163, 184, 0.2);
   --accent: #1fa2a0;
   --danger: #f87171;
+  --sidebar: rgba(7, 16, 24, 0.92);
 
+  display: grid;
+  grid-template-columns: 15.5rem 1fr;
   min-height: 100svh;
-  padding: 2rem clamp(1rem, 3vw, 2.5rem) 3rem;
   color: var(--ink);
   font-family: var(--font-body), "Segoe UI", sans-serif;
   background:
@@ -16,26 +18,90 @@
     linear-gradient(165deg, #071018 0%, #0d1a2b 55%, #101f33 100%);
 }
 
-.header {
+.sidebar {
   display: flex;
-  justify-content: space-between;
-  gap: 1.5rem;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-  animation: fade 0.45s ease-out both;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem 1rem 1.5rem 1.15rem;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
+  backdrop-filter: blur(12px);
+  animation: fade 0.4s ease-out both;
 }
 
 .brand {
   font-family: var(--font-display), Georgia, serif;
-  font-size: 1.75rem;
+  font-size: 1.55rem;
   font-weight: 700;
   letter-spacing: -0.03em;
-  margin-bottom: 0.35rem;
+  padding: 0 0.35rem;
+}
+
+.userMeta {
+  padding: 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.navLink {
+  display: block;
+  padding: 0.55rem 0.7rem;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.navLink:hover {
+  color: var(--ink);
+  background: rgba(31, 162, 160, 0.1);
+}
+
+.navLinkActive {
+  color: var(--ink);
+  background: rgba(31, 162, 160, 0.18);
+  border: 1px solid rgba(31, 162, 160, 0.35);
+}
+
+.logout {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.logout:hover {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+
+.main {
+  min-width: 0;
+  padding: 2rem clamp(1rem, 3vw, 2.5rem) 3rem;
+  animation: fade 0.5s ease-out both;
+}
+
+.pageHeader {
+  margin-bottom: 1.75rem;
 }
 
 .title {
   font-family: var(--font-display), Georgia, serif;
-  font-size: 1.15rem;
+  font-size: 1.35rem;
   font-weight: 600;
   margin-bottom: 0.35rem;
 }
@@ -45,23 +111,6 @@
   font-size: 0.92rem;
 }
 
-.actions {
-  display: flex;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.ghost {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 0.9rem;
-  padding: 0.55rem 0.9rem;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
 .section {
   margin-bottom: 2.25rem;
   padding: 1.25rem;
@@ -69,7 +118,6 @@
   border-radius: 4px;
   background: var(--panel);
   backdrop-filter: blur(10px);
-  animation: fade 0.55s ease-out both;
 }
 
 .sectionTitle {
@@ -105,7 +153,8 @@
 }
 
 .chip,
-.danger {
+.danger,
+.ghost {
   border: 1px solid var(--line);
   background: rgba(7, 16, 24, 0.5);
   color: var(--ink);
@@ -119,6 +168,11 @@
 .danger {
   border-color: rgba(248, 113, 113, 0.4);
   color: var(--danger);
+}
+
+.ghost {
+  padding: 0.55rem 0.9rem;
+  font-size: 0.9rem;
 }
 
 .form {
@@ -138,7 +192,8 @@
 }
 
 .form input,
-.form select {
+.form select,
+.form textarea {
   appearance: none;
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -152,7 +207,8 @@
 }
 
 .form input:focus,
-.form select:focus {
+.form select:focus,
+.form textarea:focus {
   outline: none;
   border-color: rgba(31, 162, 160, 0.7);
 }
@@ -195,6 +251,26 @@
   font-size: 0.92rem;
 }
 
+.ok {
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(31, 162, 160, 0.35);
+  border-radius: 3px;
+  background: rgba(15, 80, 78, 0.25);
+  color: #7dd3d1;
+  font-size: 0.92rem;
+}
+
+.rowActions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.centerMsg {
+  padding: 2rem;
+}
+
 @keyframes fade {
   from {
     opacity: 0;
@@ -206,8 +282,18 @@
   }
 }
 
-@media (max-width: 720px) {
-  .header {
-    flex-direction: column;
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }

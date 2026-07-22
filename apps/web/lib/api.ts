@@ -32,10 +32,20 @@ export function parseApiMessage(err: unknown): string {
           return "Session expirée. Reconnectez-vous.";
         case "forbidden":
           return "Accès refusé.";
+        case "email_taken":
+          return "Cette adresse e-mail est déjà utilisée.";
+        case "admin_exists":
+          return "Un administrateur existe déjà avec ce rôle.";
+        case "invalid_role":
+          return "Rôle invalide.";
+        case "invalid_email":
+          return "Adresse e-mail invalide.";
+        case "password_required":
+          return "Mot de passe requis.";
         case "internal_error":
           return "Erreur serveur. Réessayez plus tard.";
         default:
-          return "Une erreur est survenue.";
+          return parsed.error || "Une erreur est survenue.";
       }
     } catch {
       return err.message || "Une erreur est survenue.";
@@ -74,9 +84,55 @@ export type User = {
   id: string;
   email: string;
   role: "admin" | "supervisor" | "agent";
+  display_name?: string | null;
   totp_enabled: boolean;
+  disabled?: boolean;
   created_at: string;
 };
+
+export type CreateUserInput = {
+  email: string;
+  password: string;
+  role: User["role"];
+  display_name?: string;
+};
+
+export type PatchUserInput = {
+  display_name?: string;
+  role?: User["role"];
+  disabled?: boolean;
+};
+
+export async function listUsers(): Promise<User[]> {
+  return api<User[]>("/admin/users");
+}
+
+export async function createUser(input: CreateUserInput): Promise<User> {
+  return api<User>("/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function patchUser(
+  id: string,
+  input: PatchUserInput,
+): Promise<User> {
+  return api<User>(`/admin/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function resetUserPassword(
+  id: string,
+  password: string,
+): Promise<{ status: string }> {
+  return api<{ status: string }>(`/admin/users/${id}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
 
 export type LoginResponse =
   | { status: "ok"; user: User }

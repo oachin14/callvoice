@@ -24,6 +24,14 @@ export default function LoginPage() {
       router.push("/carriers");
       return;
     }
+    if (user?.role === "supervisor") {
+      router.push("/campaigns");
+      return;
+    }
+    if (user?.role === "agent") {
+      router.push("/agent");
+      return;
+    }
     router.push("/");
   }
 

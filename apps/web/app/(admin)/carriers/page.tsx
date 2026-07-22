@@ -10,7 +10,7 @@ import {
   parseApiMessage,
   User,
 } from "@/lib/api";
-import styles from "./carriers.module.css";
+import styles from "../admin.module.css";
 
 const emptyForm = {
   name: "",
@@ -133,50 +133,25 @@ export default function CarriersPage() {
     }
   }
 
-  async function onLogout() {
-    try {
-      await api("/auth/logout", { method: "POST", body: "{}" });
-    } finally {
-      router.push("/login");
-    }
-  }
-
   if (loading) {
-    return (
-      <main className={styles.shell}>
-        <p className={styles.muted}>Chargement…</p>
-      </main>
-    );
+    return <p className={styles.muted}>Chargement…</p>;
   }
 
   if (accessDenied) {
     return (
-      <main className={styles.shell}>
-        <p className={styles.error}>Accès réservé aux administrateurs.</p>
-      </main>
+      <p className={styles.error}>Accès réservé aux administrateurs.</p>
     );
   }
 
   return (
-    <main className={styles.shell}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.brand}>CallVoice</p>
-          <h1 className={styles.title}>Carriers BYOC</h1>
-          <p className={styles.muted}>
-            {user
-              ? `Connecté en tant que ${user.email}`
-              : "Administration des trunks SIP"}
-          </p>
-        </div>
-        <div className={styles.actions}>
-          <a className={styles.ghost} href="/login">
-            Connexion
-          </a>
-          <button type="button" className={styles.ghost} onClick={onLogout}>
-            Déconnexion
-          </button>
-        </div>
+    <>
+      <header className={styles.pageHeader}>
+        <h1 className={styles.title}>Carriers BYOC</h1>
+        <p className={styles.muted}>
+          {user
+            ? `Connecté en tant que ${user.email}`
+            : "Administration des trunks SIP"}
+        </p>
       </header>
 
       {error ? <p className={styles.error}>{error}</p> : null}
@@ -369,6 +344,6 @@ export default function CarriersPage() {
           </button>
         </form>
       </section>
-    </main>
+    </>
   );
 }
