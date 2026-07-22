@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -232,6 +234,77 @@ func TestAssignCampaignAgents(t *testing.T) {
 	require.NoError(t, err)
 	defer badResp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, badResp.StatusCode)
+}
+
+func TestImportLeadListCSV(t *testing.T) {
+	ts, db := setupCampaignsServer(t)
+	carrierID := insertCarrier(t, db, "Carrier H")
+	client := loginSupervisor(t, ts, db)
+	created := createCampaign(t, client, ts, carrierID, "Import Test")
+	campaignID := created["id"].(string)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "leads.csv")
+	require.NoError(t, err)
+	_, err = io.WriteString(part, "phone,name\n+33612345678,Alice\nbad,\n0611223344,Bob\n")
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteField("name", "Q1 List"))
+	require.NoError(t, writer.Close())
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/admin/campaigns/"+campaignID+"/lists/import", &body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var result map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.Equal(t, float64(2), result["imported"])
+	require.Equal(t, float64(1), result["rejected"])
+	require.NotEmpty(t, result["list_id"])
+
+	var leadCount int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM leads WHERE list_id = $1`, result["list_id"]).Scan(&leadCount))
+	require.Equal(t, 2, leadCount)
+}
+
+func TestListAndCreateDispositions(t *testing.T) {
+	ts, db := setupCampaignsServer(t)
+	carrierID := insertCarrier(t, db, "Carrier I")
+	client := loginSupervisor(t, ts, db)
+	created := createCampaign(t, client, ts, carrierID, "Dispo API")
+	campaignID := created["id"].(string)
+
+	listResp, err := client.Get(ts.URL + "/admin/campaigns/" + campaignID + "/dispositions")
+	require.NoError(t, err)
+	defer listResp.Body.Close()
+	require.Equal(t, http.StatusOK, listResp.StatusCode)
+
+	var list []map[string]any
+	require.NoError(t, json.NewDecoder(listResp.Body).Decode(&list))
+	require.Len(t, list, 5)
+
+	createBody, _ := json.Marshal(map[string]any{
+		"code":       "CUSTOM",
+		"label":      "Personnalisé",
+		"is_contact": false,
+		"is_success": false,
+	})
+	createResp, err := client.Post(
+		ts.URL+"/admin/campaigns/"+campaignID+"/dispositions",
+		"application/json",
+		bytes.NewReader(createBody),
+	)
+	require.NoError(t, err)
+	defer createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM dispositions WHERE campaign_id = $1`, campaignID).Scan(&count))
+	require.Equal(t, 6, count)
 }
 
 func TestCreateCampaignSeedsDefaultDispositions(t *testing.T) {

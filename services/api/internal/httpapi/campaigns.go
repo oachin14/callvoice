@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/callvoice/callvoice/internal/models"
+	"github.com/callvoice/callvoice/services/api/internal/csvimport"
 	"github.com/callvoice/callvoice/services/api/internal/store"
 )
 
@@ -40,6 +41,14 @@ type campaignResponse struct {
 
 func (s *Server) campaignStore() *store.CampaignStore {
 	return &store.CampaignStore{DB: s.DB}
+}
+
+func (s *Server) leadStore() *store.LeadStore {
+	return &store.LeadStore{DB: s.DB}
+}
+
+func (s *Server) dispositionStore() *store.DispositionStore {
+	return &store.DispositionStore{DB: s.DB}
 }
 
 // RequireSupervisor ensures the authenticated user has role admin or supervisor.
@@ -222,6 +231,191 @@ func parseCampaignStatus(raw string) (models.CampaignStatus, string) {
 		return models.CampaignStatusStopped, ""
 	default:
 		return "", "invalid_status"
+	}
+}
+
+type createDispositionRequest struct {
+	Code      string `json:"code"`
+	Label     string `json:"label"`
+	IsContact bool   `json:"is_contact"`
+	IsSuccess bool   `json:"is_success"`
+}
+
+type dispositionResponse struct {
+	ID         uuid.UUID  `json:"id"`
+	Code       string     `json:"code"`
+	Label      string     `json:"label"`
+	CampaignID *uuid.UUID `json:"campaign_id,omitempty"`
+	IsContact  bool       `json:"is_contact"`
+	IsSuccess  bool       `json:"is_success"`
+}
+
+type importLeadListResponse struct {
+	ListID    uuid.UUID           `json:"list_id"`
+	Imported  int                 `json:"imported"`
+	Rejected  int                 `json:"rejected"`
+	Errors    []importRowError    `json:"errors"`
+}
+
+type importRowError struct {
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+}
+
+func (s *Server) handleImportLeadList(w http.ResponseWriter, r *http.Request) {
+	campaignID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_multipart"})
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file_required"})
+		return
+	}
+	defer file.Close()
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		name = "Import"
+	}
+
+	rows, rowErrs, err := csvimport.Parse(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_csv"})
+		return
+	}
+
+	importRows := make([]store.ImportLeadRow, 0, len(rows))
+	for _, row := range rows {
+		importRows = append(importRows, store.ImportLeadRow{
+			Phone:   row.Phone,
+			Payload: row.Payload,
+		})
+	}
+
+	result, err := s.leadStore().Import(r.Context(), store.ImportLeadsInput{
+		CampaignID: campaignID,
+		Name:       name,
+		Rows:       importRows,
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	errOut := make([]importRowError, 0, len(rowErrs))
+	for i, re := range rowErrs {
+		if i >= 100 {
+			break
+		}
+		errOut = append(errOut, importRowError{Line: re.Line, Reason: re.Reason})
+	}
+
+	writeJSON(w, http.StatusCreated, importLeadListResponse{
+		ListID:   result.ListID,
+		Imported: result.Imported,
+		Rejected: len(rowErrs),
+		Errors:   errOut,
+	})
+}
+
+func (s *Server) handleListDispositions(w http.ResponseWriter, r *http.Request) {
+	campaignID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	if _, err := s.campaignStore().Get(r.Context(), campaignID); errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	} else if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	list, err := s.dispositionStore().ListByCampaign(r.Context(), campaignID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	out := make([]dispositionResponse, 0, len(list))
+	for i := range list {
+		out = append(out, toDispositionResponse(&list[i]))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleCreateDisposition(w http.ResponseWriter, r *http.Request) {
+	campaignID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	var req createDispositionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+		return
+	}
+
+	req.Code = strings.TrimSpace(req.Code)
+	req.Label = strings.TrimSpace(req.Label)
+	if req.Code == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code_required"})
+		return
+	}
+	if req.Label == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "label_required"})
+		return
+	}
+
+	if _, err := s.campaignStore().Get(r.Context(), campaignID); errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	} else if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	created, err := s.dispositionStore().Create(r.Context(), campaignID, store.CreateDispositionInput{
+		Code:      req.Code,
+		Label:     req.Label,
+		IsContact: req.IsContact,
+		IsSuccess: req.IsSuccess,
+	})
+	if errors.Is(err, store.ErrDuplicateDisposition) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duplicate_code"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, toDispositionResponse(created))
+}
+
+func toDispositionResponse(d *models.Disposition) dispositionResponse {
+	return dispositionResponse{
+		ID:         d.ID,
+		Code:       d.Code,
+		Label:      d.Label,
+		CampaignID: d.CampaignID,
+		IsContact:  d.IsContact,
+		IsSuccess:  d.IsSuccess,
 	}
 }
 
