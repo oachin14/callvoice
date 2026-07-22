@@ -3,8 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"encoding/json"
 
 	"github.com/google/uuid"
 
@@ -87,4 +88,66 @@ func (s *LeadStore) Import(ctx context.Context, in ImportLeadsInput) (*ImportLea
 		ListID:   listID,
 		Imported: imported,
 	}, nil
+}
+
+func (s *LeadStore) ClaimNext(ctx context.Context, campaignID, agentID uuid.UUID) (*models.Lead, error) {
+	campaignStore := &CampaignStore{DB: s.DB}
+	campaign, err := campaignStore.Get(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if campaign.Status != models.CampaignStatusRunning {
+		return nil, ErrInvalidCampaignState
+	}
+
+	assigned, err := campaignStore.IsAgentAssigned(ctx, campaignID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	if !assigned {
+		return nil, ErrForbidden
+	}
+
+	row := s.DB.QueryRowContext(ctx, `
+		WITH picked AS (
+			SELECT l.id
+			FROM leads l
+			JOIN lead_lists ll ON ll.id = l.list_id
+			WHERE ll.campaign_id = $1 AND l.status = 'new'
+			ORDER BY l.id
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE leads l
+		SET status = 'in_progress', assigned_agent_id = $2
+		FROM picked
+		WHERE l.id = picked.id
+		RETURNING l.id, l.list_id, l.phone, l.payload, l.status, l.disposition_id, l.assigned_agent_id
+	`, campaignID, agentID)
+
+	lead, err := scanLead(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoLeadsAvailable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim lead: %w", err)
+	}
+	return &lead, nil
+}
+
+func scanLead(row scannable) (models.Lead, error) {
+	var l models.Lead
+	var dispositionID uuid.NullUUID
+	var assignedAgentID uuid.NullUUID
+	err := row.Scan(&l.ID, &l.ListID, &l.Phone, &l.Payload, &l.Status, &dispositionID, &assignedAgentID)
+	if err != nil {
+		return l, err
+	}
+	if dispositionID.Valid {
+		l.DispositionID = &dispositionID.UUID
+	}
+	if assignedAgentID.Valid {
+		l.AssignedAgentID = &assignedAgentID.UUID
+	}
+	return l, nil
 }

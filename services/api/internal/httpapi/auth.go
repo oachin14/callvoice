@@ -149,6 +149,14 @@ func (s *Server) Routes() http.Handler {
 		})
 	})
 
+	r.Route("/agent", func(r chi.Router) {
+		r.Use(s.RequireSession, s.RequireAgent)
+		r.Get("/campaigns", s.handleAgentListCampaigns)
+		r.Post("/campaigns/{id}/join", s.handleAgentJoinCampaign)
+		r.Get("/leads/next", s.handleAgentNextLead)
+		r.Post("/dispositions", s.handleAgentDisposition)
+	})
+
 	return r
 }
 

@@ -26,6 +26,21 @@ type CreateDispositionInput struct {
 	IsSuccess bool
 }
 
+func (s *DispositionStore) Get(ctx context.Context, id uuid.UUID) (*models.Disposition, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		SELECT id, code, label, campaign_id, is_contact, is_success
+		FROM dispositions WHERE id = $1
+	`, id)
+	d, err := scanDisposition(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 func (s *DispositionStore) ListByCampaign(ctx context.Context, campaignID uuid.UUID) ([]models.Disposition, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, code, label, campaign_id, is_contact, is_success

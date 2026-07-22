@@ -14,6 +14,8 @@ import (
 
 var ErrInvalidStatusTransition = errors.New("invalid status transition")
 var ErrInvalidAgent = errors.New("invalid agent")
+var ErrInvalidCampaignState = errors.New("invalid campaign state")
+var ErrForbidden = errors.New("forbidden")
 
 type CampaignStore struct {
 	DB *sql.DB
@@ -196,6 +198,58 @@ func (s *CampaignStore) SetAgents(ctx context.Context, campaignID uuid.UUID, use
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *CampaignStore) ListRunningForAgent(ctx context.Context, agentID uuid.UUID) ([]models.Campaign, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT c.id, c.name, c.carrier_id, c.status, c.dial_mode, c.created_at, c.updated_at
+		FROM campaigns c
+		INNER JOIN campaign_agents ca ON ca.campaign_id = c.id
+		WHERE ca.user_id = $1 AND c.status = 'running'
+		ORDER BY c.created_at ASC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.Campaign
+	for rows.Next() {
+		c, err := scanCampaign(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *CampaignStore) IsAgentAssigned(ctx context.Context, campaignID, agentID uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM campaign_agents WHERE campaign_id = $1 AND user_id = $2
+		)
+	`, campaignID, agentID).Scan(&exists)
+	return exists, err
+}
+
+func (s *CampaignStore) ValidateAgentJoin(ctx context.Context, campaignID, agentID uuid.UUID) error {
+	campaign, err := s.Get(ctx, campaignID)
+	if err != nil {
+		return err
+	}
+	if campaign.Status != models.CampaignStatusRunning {
+		return ErrInvalidCampaignState
+	}
+	assigned, err := s.IsAgentAssigned(ctx, campaignID, agentID)
+	if err != nil {
+		return err
+	}
+	if !assigned {
+		return ErrForbidden
+	}
+	return nil
 }
 
 const campaignSelectSQL = `
