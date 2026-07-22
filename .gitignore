@@ -4,3 +4,6 @@
 node_modules/
 dist/
 *.exe
+.lab/
+# Machine-specific Compose overrides (see docker-compose.override.example.yml)
+docker-compose.override.yml

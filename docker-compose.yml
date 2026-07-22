@@ -15,12 +15,19 @@ services:
     ports: ["6379:6379"]
   freeswitch:
     build: ./deploy/freeswitch
-    # ports intentionally NOT published to host public by default in prod docs;
-    # for lab, map ESL only on localhost:
-    ports: ["127.0.0.1:8021:8021"]
+    # ESL is internal to the Compose network (edge → freeswitch:8021).
+    # Do not publish 8021 on the host by default (conflicts on some macOS setups).
+    # For host access or WSS lab ports, use docker-compose.override.yml (gitignored).
+    # Debug: docker compose exec freeswitch fs_cli
     volumes:
       - fs_gateways:/etc/freeswitch/gateways
       - fs_directory:/etc/freeswitch/directory/default
+      # Image entrypoint recopies vanilla conf; bind-mount CallVoice lab configs.
+      - ./deploy/freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./deploy/freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
+      - ./deploy/freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+      - ./deploy/freeswitch/conf/sip_profiles/internal.xml:/etc/freeswitch/sip_profiles/internal.xml:ro
+      - ./deploy/freeswitch/conf/dialplan/public/00_callvoice_inbound.xml:/etc/freeswitch/dialplan/public/00_callvoice_inbound.xml:ro
   api:
     build:
       context: .

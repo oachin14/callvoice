@@ -1,0 +1,31 @@
+# Local overrides — copy to docker-compose.override.yml (gitignored).
+# Docker Compose merges this file automatically with docker-compose.yml.
+#
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#
+# Use this for Mac/lab-only ports, secrets, and machine-specific mounts.
+# Do NOT commit docker-compose.override.yml.
+
+services:
+  # Example: expose FreeSWITCH ESL on an alternate host port if you need fs_cli
+  # from the Mac (8021 is often reserved by launchd).
+  # freeswitch:
+  #   ports:
+  #     - "127.0.0.1:18021:8021"
+
+  # Example: expose WSS for browser WebRTC lab testing
+  # freeswitch:
+  #   ports:
+  #     - "127.0.0.1:7443:7443"
+
+  api:
+    environment:
+      # Lab passwords / origins — change freely on your machine
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMeLabOnly}
+      # COOKIE_SECURE: "false"
+      # CORS_ORIGINS: http://localhost:3000
+
+  # web:
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://localhost:8080
+  #     NEXT_PUBLIC_EDGE_URL: http://localhost:8081

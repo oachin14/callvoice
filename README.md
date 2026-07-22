@@ -11,7 +11,7 @@ Monorepo lab stack for CallVoice telephony core development.
 | `web`      | 3000 | Next.js web app                      |
 | `postgres` | 5432 | PostgreSQL 16                        |
 | `redis`    | 6379 | Redis 7                              |
-| `freeswitch` | 8021 (localhost) | FreeSWITCH ESL lab image |
+| `freeswitch` | *(internal)* | FreeSWITCH — ESL on compose network only |
 
 ## Quick start
 
@@ -20,6 +20,17 @@ docker compose up -d --build
 curl -s localhost:8080/healthz   # {"status":"ok"}
 curl -s localhost:8081/healthz   # {"status":"ok"}
 ```
+
+### Machine-specific lab overrides (Mac / local)
+
+Shared Compose stays in git. Local ports, secrets, and host mappings go in a **gitignored** override:
+
+```bash
+cp docker-compose.override.example.yml docker-compose.override.yml
+# edit docker-compose.override.yml — never commit it
+```
+
+Credentials / TOTP secrets for your laptop can live under `.lab/` (also gitignored).
 
 ### Demo seed (jalon C)
 
