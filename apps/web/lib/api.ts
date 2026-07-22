@@ -80,6 +80,29 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+/** Multipart / FormData upload — do not set Content-Type (browser sets boundary). */
+export async function apiForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+
+  if (!res.ok) {
+    throw new ApiError(res.status, await res.text());
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await res.text();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
+}
+
 export type User = {
   id: string;
   email: string;
@@ -172,3 +195,100 @@ export type CreateCarrierInput = {
   enabled?: boolean;
   priority?: number;
 };
+
+export type CampaignStatus = "draft" | "running" | "paused" | "stopped";
+
+export type Campaign = {
+  id: string;
+  name: string;
+  carrier_id: string;
+  status: CampaignStatus;
+  dial_mode: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Disposition = {
+  id: string;
+  code: string;
+  label: string;
+  campaign_id?: string | null;
+  is_contact: boolean;
+  is_success: boolean;
+};
+
+export type ImportLeadListResult = {
+  list_id: string;
+  imported: number;
+  rejected: number;
+  errors: { line: number; reason: string }[];
+};
+
+export async function listCampaigns(): Promise<Campaign[]> {
+  return api<Campaign[]>("/admin/campaigns");
+}
+
+export async function createCampaign(input: {
+  name: string;
+  carrier_id: string;
+}): Promise<Campaign> {
+  return api<Campaign>("/admin/campaigns", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function patchCampaign(
+  id: string,
+  input: { name?: string; carrier_id?: string; status?: CampaignStatus },
+): Promise<Campaign> {
+  return api<Campaign>(`/admin/campaigns/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function assignCampaignAgents(
+  id: string,
+  userIds: string[],
+): Promise<{ status: string }> {
+  return api<{ status: string }>(`/admin/campaigns/${id}/agents`, {
+    method: "PUT",
+    body: JSON.stringify({ user_ids: userIds }),
+  });
+}
+
+export async function importCampaignLeads(
+  id: string,
+  file: File,
+  name?: string,
+): Promise<ImportLeadListResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (name) form.append("name", name);
+  return apiForm<ImportLeadListResult>(
+    `/admin/campaigns/${id}/lists/import`,
+    form,
+  );
+}
+
+export async function listDispositions(
+  campaignId: string,
+): Promise<Disposition[]> {
+  return api<Disposition[]>(`/admin/campaigns/${campaignId}/dispositions`);
+}
+
+export async function createDisposition(
+  campaignId: string,
+  input: {
+    code: string;
+    label: string;
+    is_contact?: boolean;
+    is_success?: boolean;
+  },
+): Promise<Disposition> {
+  return api<Disposition>(`/admin/campaigns/${campaignId}/dispositions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
