@@ -208,6 +208,16 @@ export type Campaign = {
   updated_at: string;
 };
 
+export type Lead = {
+  id: string;
+  list_id: string;
+  phone: string;
+  payload: Record<string, string>;
+  status: string;
+  disposition_id?: string | null;
+  assigned_agent_id?: string | null;
+};
+
 export type Disposition = {
   id: string;
   code: string;
@@ -223,6 +233,44 @@ export type ImportLeadListResult = {
   rejected: number;
   errors: { line: number; reason: string }[];
 };
+
+export async function listAgentCampaigns(): Promise<Campaign[]> {
+  return api<Campaign[]>("/agent/campaigns");
+}
+
+export async function joinAgentCampaign(id: string): Promise<void> {
+  return api<void>(`/agent/campaigns/${id}/join`, { method: "POST", body: "{}" });
+}
+
+export async function listAgentDispositions(
+  campaignId: string,
+): Promise<Disposition[]> {
+  return api<Disposition[]>(`/agent/campaigns/${campaignId}/dispositions`);
+}
+
+export async function claimNextLead(
+  campaignId: string,
+): Promise<Lead | undefined> {
+  return api<Lead | undefined>(
+    `/agent/leads/next?campaign_id=${encodeURIComponent(campaignId)}`,
+  );
+}
+
+export async function postAgentDisposition(input: {
+  campaign_id: string;
+  lead_id: string;
+  disposition_id: string;
+  call_uuid?: string;
+  to_number: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_sec?: number;
+}): Promise<unknown> {
+  return api("/agent/dispositions", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
 
 export async function listCampaigns(): Promise<Campaign[]> {
   return api<Campaign[]>("/admin/campaigns");

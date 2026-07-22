@@ -3,7 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Invitation } from "sip.js";
-import { api, parseApiMessage, type User } from "../../lib/api";
+import {
+  api,
+  claimNextLead,
+  joinAgentCampaign,
+  listAgentCampaigns,
+  listAgentDispositions,
+  parseApiMessage,
+  postAgentDisposition,
+  type Campaign,
+  type Disposition,
+  type Lead,
+  type User,
+} from "../../lib/api";
 import { edgeApi, type WebRTCConfig } from "../../lib/edge";
 import { Softphone } from "../../lib/softphone";
 import { SoftphonePanel } from "./softphone";
@@ -26,12 +38,24 @@ export default function AgentConsolePage() {
   const [muted, setMuted] = useState(false);
   const [held, setHeld] = useState(false);
 
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [joinedCampaignId, setJoinedCampaignId] = useState<string | null>(null);
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [dispositions, setDispositions] = useState<Disposition[]>([]);
+  const [wrapUp, setWrapUp] = useState(false);
+  const [ok, setOk] = useState("");
+
   const softphoneRef = useRef<Softphone | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const userIdRef = useRef<string | null>(null);
   const expectOutboundInvite = useRef(false);
   const outboundInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presenceRef = useRef<"available" | "paused">("available");
+  const callStartedAtRef = useRef<string | null>(null);
+  const leadRef = useRef<Lead | null>(null);
+  const joinedCampaignRef = useRef<string | null>(null);
+  const callUUIDRef = useRef<string | null>(null);
 
   function clearOutboundInviteTimeout() {
     if (outboundInviteTimeoutRef.current !== null) {
@@ -66,6 +90,18 @@ export default function AgentConsolePage() {
   useEffect(() => {
     presenceRef.current = presence;
   }, [presence]);
+
+  useEffect(() => {
+    leadRef.current = lead;
+  }, [lead]);
+
+  useEffect(() => {
+    joinedCampaignRef.current = joinedCampaignId;
+  }, [joinedCampaignId]);
+
+  useEffect(() => {
+    callUUIDRef.current = callUUID;
+  }, [callUUID]);
 
   useEffect(() => () => clearOutboundInviteTimeout(), []);
 
@@ -142,6 +178,10 @@ export default function AgentConsolePage() {
               setMuted(false);
               setHeld(false);
               setUiState((cur) => (cur === "in_call" ? presenceRef.current : cur));
+              if (leadRef.current && joinedCampaignRef.current) {
+                setWrapUp(true);
+              }
+              callStartedAtRef.current = null;
             }
           }
         } catch {
@@ -162,6 +202,15 @@ export default function AgentConsolePage() {
         const me = await api<User>("/auth/me");
         userIdRef.current = me.id;
         setUser(me);
+        if (me.role === "agent") {
+          try {
+            const list = await listAgentCampaigns();
+            setCampaigns(list);
+            setSelectedCampaignId((cur) => cur || (list[0]?.id ?? ""));
+          } catch {
+            /* campaigns optional until assigned */
+          }
+        }
       } catch {
         retryTimer = setTimeout(() => {
           void ensureSessionThenConnect();
@@ -205,6 +254,10 @@ export default function AgentConsolePage() {
         setHeld(false);
         setCallUUID(null);
         setUiState(presenceRef.current);
+        if (leadRef.current && joinedCampaignRef.current) {
+          setWrapUp(true);
+        }
+        callStartedAtRef.current = null;
       },
       onError: (err) => setError(err.message),
     });
@@ -300,22 +353,77 @@ export default function AgentConsolePage() {
     }
   }
 
+  async function onJoinCampaign() {
+    if (!selectedCampaignId) return;
+    setError("");
+    setOk("");
+    setBusy(true);
+    try {
+      await joinAgentCampaign(selectedCampaignId);
+      setJoinedCampaignId(selectedCampaignId);
+      joinedCampaignRef.current = selectedCampaignId;
+      const dispos = await listAgentDispositions(selectedCampaignId);
+      setDispositions(dispos);
+      setLead(null);
+      setWrapUp(false);
+      setOk("Campagne rejointe.");
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onNextLead() {
+    if (!joinedCampaignId) return;
+    setError("");
+    setOk("");
+    setBusy(true);
+    try {
+      const next = await claimNextLead(joinedCampaignId);
+      if (!next) {
+        setLead(null);
+        setOk("Plus de leads disponibles.");
+        return;
+      }
+      setLead(next);
+      setDialTo(next.phone);
+      setWrapUp(false);
+      setOk("");
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onCall() {
     setError("");
     setBusy(true);
     try {
       expectOutboundInvite.current = true;
+      const payload: {
+        to: string;
+        campaign_id?: string;
+        lead_id?: string;
+      } = { to: dialTo.trim() };
+      if (joinedCampaignId && lead) {
+        payload.campaign_id = joinedCampaignId;
+        payload.lead_id = lead.id;
+      }
+      callStartedAtRef.current = new Date().toISOString();
       const res = await edgeApi<{ status: string; call_uuid: string }>(
         "/calls/outbound",
         {
           method: "POST",
-          body: JSON.stringify({ to: dialTo.trim() }),
+          body: JSON.stringify(payload),
         },
       );
       setCallUUID(res.call_uuid);
       scheduleOutboundInviteTimeout(res.call_uuid);
     } catch (err) {
       clearExpectOutboundInvite();
+      callStartedAtRef.current = null;
       setError(parseApiMessage(err));
     } finally {
       setBusy(false);
@@ -343,6 +451,45 @@ export default function AgentConsolePage() {
       setMuted(false);
       setHeld(false);
       setUiState(presenceRef.current);
+      if (lead && joinedCampaignId) {
+        setWrapUp(true);
+      }
+      callStartedAtRef.current = null;
+    } catch (err) {
+      setError(parseApiMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDispose(dispositionId: string) {
+    if (!lead || !joinedCampaignId) return;
+    setError("");
+    setOk("");
+    setBusy(true);
+    try {
+      const endedAt = new Date().toISOString();
+      const startedAt = callStartedAtRef.current || endedAt;
+      let durationSec: number | undefined;
+      const startMs = Date.parse(startedAt);
+      const endMs = Date.parse(endedAt);
+      if (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs >= startMs) {
+        durationSec = Math.round((endMs - startMs) / 1000);
+      }
+      await postAgentDisposition({
+        campaign_id: joinedCampaignId,
+        lead_id: lead.id,
+        disposition_id: dispositionId,
+        call_uuid: callUUIDRef.current || undefined,
+        to_number: lead.phone,
+        started_at: startedAt,
+        ended_at: endedAt,
+        duration_sec: durationSec,
+      });
+      setOk("Qualification enregistrée.");
+      setLead(null);
+      setWrapUp(false);
+      setDialTo("");
     } catch (err) {
       setError(parseApiMessage(err));
     } finally {
@@ -436,10 +583,98 @@ export default function AgentConsolePage() {
         <p className={styles.status}>
           État : <strong>{uiState}</strong>
           {user ? ` · ${user.email}` : ""}
+          {joinedCampaignId
+            ? ` · campagne ${campaigns.find((c) => c.id === joinedCampaignId)?.name || joinedCampaignId.slice(0, 8)}`
+            : ""}
         </p>
         {error ? <p className={styles.error}>{error}</p> : null}
+        {ok ? <p className={styles.ok}>{ok}</p> : null}
 
         <audio ref={audioRef} autoPlay playsInline />
+
+        {user?.role === "agent" || campaigns.length > 0 ? (
+          <div className={styles.campaignBox}>
+            <label className={styles.dialLabel} htmlFor="campaign-select">
+              Campagne
+            </label>
+            <div className={styles.dialRow}>
+              <select
+                id="campaign-select"
+                className={styles.dialInput}
+                value={selectedCampaignId}
+                onChange={(e) => setSelectedCampaignId(e.target.value)}
+                disabled={busy || inCall || wrapUp}
+              >
+                <option value="">Sélectionner…</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={busy || !selectedCampaignId || inCall}
+                onClick={onJoinCampaign}
+              >
+                Rejoindre
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {joinedCampaignId ? (
+          <div className={styles.leadBox}>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                disabled={busy || inCall || wrapUp || !registered}
+                onClick={onNextLead}
+              >
+                Prochain lead
+              </button>
+            </div>
+            {lead ? (
+              <div className={styles.leadCard}>
+                <p className={styles.leadPhone}>{lead.phone}</p>
+                <p className={styles.softphoneSub}>Lead {lead.id.slice(0, 8)}…</p>
+                {Object.keys(lead.payload || {}).length > 0 ? (
+                  <dl className={styles.leadPayload}>
+                    {Object.entries(lead.payload).map(([k, v]) => (
+                      <div key={k}>
+                        <dt>{k}</dt>
+                        <dd>{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+              </div>
+            ) : (
+              <p className={styles.softphoneSub}>Aucun lead en cours.</p>
+            )}
+          </div>
+        ) : null}
+
+        {wrapUp && lead && dispositions.length > 0 ? (
+          <div className={styles.wrapUp}>
+            <p className={styles.softphoneTitle}>Qualification</p>
+            <p className={styles.softphoneSub}>
+              Choisissez une disposition pour {lead.phone}
+            </p>
+            <div className={styles.dispoRow}>
+              {dispositions.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onDispose(d.id)}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className={styles.actions}>
           {offline || connecting ? (
@@ -481,7 +716,7 @@ export default function AgentConsolePage() {
                 placeholder="+33123456789"
                 value={dialTo}
                 onChange={(e) => setDialTo(e.target.value)}
-                disabled={busy || inCall || pendingOutbound || !!ringing}
+                disabled={busy || inCall || pendingOutbound || !!ringing || wrapUp}
               />
               {inCall || pendingOutbound ? (
                 <button type="button" disabled={busy} onClick={onHangupMedia}>
@@ -490,7 +725,7 @@ export default function AgentConsolePage() {
               ) : (
                 <button
                   type="button"
-                  disabled={busy || !dialTo.trim() || !!ringing}
+                  disabled={busy || !dialTo.trim() || !!ringing || wrapUp}
                   onClick={onCall}
                 >
                   Appeler

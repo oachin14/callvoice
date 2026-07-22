@@ -171,3 +171,76 @@
   font-size: 0.8rem;
   overflow-x: auto;
 }
+
+.ok {
+  color: #0b5c4a;
+  margin: 0 0 1rem;
+}
+
+.campaignBox,
+.leadBox,
+.wrapUp {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(11, 61, 74, 0.12);
+}
+
+.leadCard {
+  margin-top: 0.5rem;
+}
+
+.leadPhone {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0b3d4a;
+}
+
+.leadPayload {
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+}
+
+.leadPayload div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.5rem;
+}
+
+.leadPayload dt {
+  color: #4a5c66;
+}
+
+.leadPayload dd {
+  margin: 0;
+}
+
+.dispoRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.dispoRow button {
+  appearance: none;
+  border: 1px solid #1a4a58;
+  background: transparent;
+  color: #0b3d4a;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.dispoRow button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dispoRow button:hover:not(:disabled) {
+  background: #0b3d4a;
+  color: #f4f8f9;
+}

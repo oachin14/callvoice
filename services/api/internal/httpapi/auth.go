@@ -155,6 +155,7 @@ func (s *Server) Routes() http.Handler {
 		r.Use(s.RequireSession, s.RequireAgent)
 		r.Get("/campaigns", s.handleAgentListCampaigns)
 		r.Post("/campaigns/{id}/join", s.handleAgentJoinCampaign)
+		r.Get("/campaigns/{id}/dispositions", s.handleAgentListDispositions)
 		r.Get("/leads/next", s.handleAgentNextLead)
 		r.Post("/dispositions", s.handleAgentDisposition)
 	})

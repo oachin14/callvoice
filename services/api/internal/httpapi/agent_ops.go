@@ -111,6 +111,44 @@ func (s *Server) handleAgentJoinCampaign(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleAgentListDispositions(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	campaignID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	if err := s.campaignStore().ValidateAgentJoin(r.Context(), campaignID, user.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+			return
+		}
+		if errors.Is(err, store.ErrForbidden) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		if errors.Is(err, store.ErrInvalidCampaignState) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "campaign_not_running"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	list, err := s.dispositionStore().ListByCampaign(r.Context(), campaignID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+		return
+	}
+
+	out := make([]dispositionResponse, 0, len(list))
+	for i := range list {
+		out = append(out, toDispositionResponse(&list[i]))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleAgentNextLead(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	rawCampaignID := strings.TrimSpace(r.URL.Query().Get("campaign_id"))
