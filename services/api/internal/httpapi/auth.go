@@ -137,6 +137,13 @@ func (s *Server) Routes() http.Handler {
 			r.Patch("/users/{id}", s.handlePatchUser)
 			r.Post("/users/{id}/reset-password", s.handleResetUserPassword)
 		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.RequireSession, s.RequireSupervisor)
+			r.Get("/campaigns", s.handleListCampaigns)
+			r.Post("/campaigns", s.handleCreateCampaign)
+			r.Patch("/campaigns/{id}", s.handlePatchCampaign)
+			r.Put("/campaigns/{id}/agents", s.handleAssignCampaignAgents)
+		})
 	})
 
 	return r
